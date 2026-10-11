@@ -1,0 +1,10 @@
+command_hex,name,direction,status,evidence_address,notes
+0x20,VOUT_MODE,read/write,unverified,,标准命令候选；不代表该固件支持
+0x21,VOUT_COMMAND,read/write,unverified,,需找到命令分发和写入路径
+0x79,STATUS_WORD,read,unverified,,需确认
+0x88,READ_VIN,read,unverified,,标准命令候选
+0x8B,READ_VOUT,read,unverified,,标准命令候选
+0x8C,READ_IOUT,read,unverified,,标准命令候选
+0x8D,READ_TEMPERATURE_1,read,unverified,,标准命令候选
+0x90,READ_FAN_SPEED_1,read,unverified,,标准命令候选
+0xD0,VENDOR_SPECIFIC,unknown,unverified,,厂商命令范围需证据
