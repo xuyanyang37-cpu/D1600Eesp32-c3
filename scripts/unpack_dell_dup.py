@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
-import gzip, io, tarfile, sys
+"""Inspect/extract a payload from a Dell DUP container.
+
+This script intentionally avoids guessing offsets. It prints candidate occurrences
+of common binary markers and leaves final payload boundaries to evidence-based review.
+"""
+import sys
 from pathlib import Path
 
-src = Path(sys.argv[1])
-out = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("extracted")
-data = src.read_bytes()
-off = data.find(b"\x1f\x8b")
-if off < 0:
-    raise SystemExit("gzip member not found")
-tar_bytes = gzip.decompress(data[off:])
-with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:") as tf:
-    for m in tf.getmembers():
-        if m.isfile():
-            dest = out / m.name
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_bytes(tf.extractfile(m).read())
-print("Extracted:", out)
+p = Path(sys.argv[1])
+data = p.read_bytes()
+print(f"file={p} size={len(data)}")
+print(f"first_64={data[:64].hex(' ')}")
+for marker in (b"095HR5", b"190AD", b"VRTX", b"Dell"):
+    offsets = []
+    start = 0
+    while True:
+        pos = data.find(marker, start)
+        if pos < 0:
+            break
+        offsets.append(pos)
+        start = pos + 1
+    if offsets:
+        print(f"{marker!r}: " + ", ".join(hex(x) for x in offsets))
+print("Use verified container structure/length fields before extracting any payload.")
