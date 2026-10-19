@@ -111,14 +111,18 @@ bool PmbusPeek::readBlock(uint16_t command, uint8_t *buffer, size_t capacity, si
     length=0;
     if (!buffer || capacity==0 || capacity>32) { _lastError=-7; return false; }
     if (!selectCommand(command)) return false;
-    uint8_t raw[33];
-    size_t got=_wire.requestFrom((uint8_t)_address,(size_t)sizeof(raw),(bool)true);
+    uint8_t raw[34];
+    size_t requestLen=33U+(_pecEnabled?1U:0U);
+    size_t got=_wire.requestFrom((uint8_t)_address,requestLen,(bool)true);
     size_t n=0;
     while (_wire.available() && n<sizeof(raw)) raw[n++]=(uint8_t)_wire.read();
     if (!got || n<1) { _lastError=-8; return false; }
     size_t announced=raw[0];
-    if (announced>32 || announced+1>n || announced>capacity) {
-        _lastError=-9; return false;
+    if (announced>32 || announced>capacity || announced+1U+(_pecEnabled?1U:0U)>n) { _lastError=-9; return false; }
+    if (_pecEnabled) {
+        uint8_t crc=crc8Update(_pendingPecCrc,(uint8_t)((_address<<1)|1U));
+        for(size_t i=0;i<announced+1U;i++) crc=crc8Update(crc,raw[i]);
+        if(raw[announced+1U]!=crc) { _lastError=-28; return false; }
     }
     memcpy(buffer,raw+1,announced); length=announced; _lastError=0; return true;
 }
