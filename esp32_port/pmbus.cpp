@@ -273,8 +273,12 @@ bool PmbusPeek::queryInternal(CommandInfo &info) {
     info.query=flags; info.supportedKnown=true; info.supported=(flags&0x80)!=0;
     if(!info.supported) return true;
     if(((flags>>2)&7)==3) {
-        if(flags&(1<<5)) readCoefficients((uint8_t)info.command,true,info.readCoefficients);
-        if(flags&(1<<6)) readCoefficients((uint8_t)info.command,false,info.writeCoefficients);
+        // 原版仅在 COEFFICIENTS 命令本身被设备确认支持时读取 DIRECT 系数。
+        const CommandInfo *coeffInfo=findCommand(PMB_COEFFICIENTS);
+        if(coeffInfo && coeffInfo->supportedKnown && coeffInfo->supported) {
+            if(flags&(1<<5)) readCoefficients((uint8_t)info.command,true,info.readCoefficients);
+            if(flags&(1<<6)) readCoefficients((uint8_t)info.command,false,info.writeCoefficients);
+        }
     }
     if(info.command==PMB_VOUT_MODE){uint8_t mode=0;if(readByte(PMB_VOUT_MODE,mode)){info.readCoefficients.R=(int8_t)mode;info.readCoefficients.valid=true;info.writeCoefficients.R=(int8_t)mode;info.writeCoefficients.valid=true;}}
     delay(1); return true;
