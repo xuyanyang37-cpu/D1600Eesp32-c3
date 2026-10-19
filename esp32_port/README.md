@@ -189,3 +189,21 @@ pmbus.showAll(Serial, true, true);
 - **0x1A QUERY**：用于确认命令支持情况和数据格式。LINEAR11、LINEAR16、DIRECT 等解码不能只根据命令名称猜测。
 - **0xA0 以后厂商命令**：当前名称是候选标签或标准/常见命名，不是 D1600E-S0 的反编译结论。后续应把原始读取值、QUERY 结果、固件反汇编证据和推测分栏记录。
 
+
+
+## 物理量单位枚举（ESP32 移植代码）
+
+`pmbus.h` 的 `UnitType` 在保留原有枚举顺序和值的前提下，追加了以下单位标签：
+
+| 枚举 | 显示单位 | 用途/注意事项 |
+|---|---|---|
+| `UNIT_PERCENT` | % | 占空比等百分比读数；原始值缩放必须按命令格式确认 |
+| `UNIT_RPM` | RPM | 风扇转速读数 |
+| `UNIT_HERTZ` | Hz | 赫兹 |
+| `UNIT_KILOHERTZ` | kHz | 千赫兹；当前用于 `READ_FREQUENCY (0x95)` 的候选显示单位 |
+| `UNIT_OHMS` | ohm | 欧姆 |
+| `UNIT_MILLIOHMS` | mohm | 毫欧 |
+| `UNIT_VOLTS_PER_SECOND` | V/s | 电压变化速率；确认命令单位后才应映射 |
+| `UNIT_MILLIVOLTS_PER_AMP` | mV/A | 毫伏/安培；确认具体命令定义后才应映射 |
+
+当前代码将 `0x90–0x93 READ_FAN_SPEED_1..4` 标记为 `UNIT_RPM`，将 `0x94 READ_DUTY_CYCLE` 标记为 `UNIT_PERCENT`，将 `0x95 READ_FREQUENCY` 标记为 `UNIT_KILOHERTZ`。这些是单位标签，不证明 D1600E-S0 一定支持对应命令，也不会自动完成原始值的比例换算；设备支持情况和数值缩放仍需 QUERY/实测验证。欧姆、毫欧、电压变化速率、mV/A 目前只建立单位类型，没有擅自绑定到未经确认的命令。
