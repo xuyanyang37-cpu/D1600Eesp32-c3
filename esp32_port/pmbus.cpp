@@ -6,7 +6,8 @@ PmbusPeek::PmbusPeek(TwoWire &bus)
 bool PmbusPeek::begin(uint8_t address) {
     _address = address & 0x7F; // Arduino Wire uses a 7-bit address
     _lastError = 0;
-    _wire.begin();
+    // The caller owns bus initialization so custom SDA/SCL pins are preserved.
+    // Call Wire.begin(SDA_PIN, SCL_PIN) before PmbusPeek::begin().
     return true;
 }
 
