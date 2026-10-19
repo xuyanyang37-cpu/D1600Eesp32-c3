@@ -28,7 +28,7 @@ static const uint8_t PMB_CLEAR_FAULT=0x03, PMB_CAPABILITY=0x19,
 PmbusPeek::PmbusPeek(TwoWire &bus)
  : _wire(bus), _address(0x58), _capability(0), _revision(0),
    _lastError(0), _writesEnabled(false), _queryAvailable(false),
-   _scanComplete(false), _queryAllRequested(false), _pendingPecCrc(0), _commandCount(0) {
+   _scanComplete(false), _queryAllRequested(false), _commandCount(0) {
     initializeCommandTable();
 }
 
@@ -81,24 +81,45 @@ bool PmbusPeek::readWord(uint16_t command, uint16_t &value) {
     value=(uint16_t)b[0] | ((uint16_t)b[1]<<8);
     return true;
 }
-// SMBus Block Read：长度字节后跟数据；受 Arduino Wire 缓冲区限制，最多 32 字节。
+// SMBus Block Read。按原版先单独读取长度，再重新发起块读取。
+// Arduino Wire 常见接收缓冲区为 32 字节（含长度字节），因此本实现
+// 可靠支持最多 31 字节数据；32 字节数据需要底层支持至少 33 字节接收。
 bool PmbusPeek::readBlock(uint16_t command, uint8_t *buffer, size_t capacity, size_t &length) {
     length=0;
     if (!buffer || capacity==0 || capacity>32) { _lastError=-7; return false; }
+
+    uint8_t announced=0;
+    if (!readByte(command, announced)) return false;
+    if (announced==0) { _lastError=0; return true; }
+    if (announced>31 || announced>capacity) {
+        _lastError=-9; // 当前 Wire 适配层无法安全接收长度字节 + 32 字节数据
+        return false;
+    }
+
+    // 第二次事务按 SMBus Block Read 格式读取 count + payload；
+    // 总字节数不超过 Wire 常见的 32 字节缓冲区。
     if (!selectCommand(command)) return false;
-    size_t got=_wire.requestFrom((uint8_t)_address, (size_t)33, (uint8_t)true);
-    if (got<1 || !_wire.available()) { _lastError=-8; return false; }
-    uint8_t announced=(uint8_t)_wire.read();
-    if (announced>32 || announced>capacity || got<(size_t)announced+1U) {
+    size_t expected=(size_t)announced+1U;
+    size_t got=_wire.requestFrom((uint8_t)_address, expected, (uint8_t)true);
+    if (got!=expected || !_wire.available()) {
         while (_wire.available()) (void)_wire.read();
-        _lastError=-9; return false;
+        _lastError=-8;
+        return false;
+    }
+    uint8_t actual=(uint8_t)_wire.read();
+    if (actual!=announced) {
+        while (_wire.available()) (void)_wire.read();
+        _lastError=-11; // 两次读取间长度发生变化，拒绝使用不一致数据
+        return false;
     }
     for (size_t i=0;i<announced;i++) {
         if (!_wire.available()) { _lastError=-10; return false; }
         buffer[i]=(uint8_t)_wire.read();
     }
     while (_wire.available()) (void)_wire.read();
-    length=announced; _lastError=0; return true;
+    length=announced;
+    _lastError=0;
+    return true;
 }
 // 写操作默认锁定。
 bool PmbusPeek::writeByte(uint16_t command,uint8_t value) {
