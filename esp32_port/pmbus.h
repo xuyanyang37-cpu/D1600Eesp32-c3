@@ -44,16 +44,17 @@ public:
 
     explicit PmbusPeek(TwoWire &bus = Wire);
     bool begin(uint8_t address = 0x58); // 先调用 Wire.begin(SDA_PIN, SCL_PIN) 初始化总线
+    // 显式启用/禁用写操作；默认禁用，避免意外修改电源参数。
     void setWritesEnabled(bool enabled) { _writesEnabled = enabled; }
     bool writesEnabled() const { return _writesEnabled; }
-    void setPECEnabled(bool enabled) { _pecEnabled = enabled; }
-    bool pecEnabled() const { return _pecEnabled; }
+
     // 开启/关闭软件 PEC 校验（CRC-8，多项式 0x07）；默认关闭。
     // 只有确认目标电源要求 PEC 后才开启。
     void setPECEnabled(bool enabled) { _pecEnabled = enabled; }
     bool pecEnabled() const { return _pecEnabled; }
+
     // 判断是否属于 0xFExx / 0xFFxx 扩展命令。
-    // 注意：扩展命令的传输字节顺序必须结合目标电源协议确认。
+    // 扩展命令的传输字节顺序仍需结合目标电源协议确认。
     bool isExtendedCommand(uint16_t command) const { return (command & 0xFE00U) == 0xFE00U; }
     uint8_t address() const { return _address; }
     int lastError() const { return _lastError; }
@@ -61,8 +62,7 @@ public:
     uint8_t revision() const { return _revision; }
     bool queryAvailable() const { return _queryAvailable; }
 
-    // Transport / PMBus primitives. Extended 0xFExx/0xFFxx commands use a
-    // two-byte prefix-first raw-I2C encoding; verify this against the device.
+    // 底层 PMBus/I2C 操作。扩展命令采用两字节前缀传输约定，使用前需验证目标协议。
     bool probe();
     bool readByte(uint16_t command, uint8_t &value);
     bool readWord(uint16_t command, uint16_t &value);
