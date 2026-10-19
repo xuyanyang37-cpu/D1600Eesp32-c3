@@ -2,11 +2,11 @@
 #include <Wire.h>
 #include "pmbus.h"
 
-// Set these pins to match your actual ESP32 wiring.
-// Never connect PSU 12 V or non-3.3 V logic directly to ESP32 GPIO.
-static const int I2C_SDA_PIN = 8; // CHANGE to your wiring
-static const int I2C_SCL_PIN = 9; // CHANGE to your wiring
-static const uint8_t PSU_I2C_ADDRESS = 0x58; // user's observed 7-bit address
+// 请按实际接线修改 ESP32 的 SDA/SCL 引脚。
+// 严禁将电源 12V 或非 3.3V 逻辑直接接到 ESP32 GPIO。
+static const int I2C_SDA_PIN = 8; // 按实际接线修改
+static const int I2C_SCL_PIN = 9; // 按实际接线修改
+static const uint8_t PSU_I2C_ADDRESS = 0x58; // 已观测到的 7 位地址，接线后仍需确认
 
 PmbusPeek pmbus(Wire);
 
@@ -17,24 +17,24 @@ void setup() {
   Wire.setClock(100000);
   pmbus.begin(PSU_I2C_ADDRESS);
 
-  // Optional software PEC (CRC-8/0x07). Keep off unless target PSU requires it.
+  // 可选：启用软件 PEC（CRC-8/0x07）。只有确认电源要求 PEC 后才取消下一行注释。
   // pmbus.setPECEnabled(true);
 
-  Serial.println("D1600E PMBus full-feature diagnostic port");
-  Serial.println("READ ONLY by default. No writes are enabled.");
+  Serial.println("D1600E PMBus 诊断程序");
+  Serial.println("默认只读，所有写操作均已锁定。");
   if (!pmbus.probe()) {
-    Serial.print("I2C probe failed, error=");
+    Serial.print("I2C 探测失败，错误码=");
     Serial.println(pmbus.lastError());
     return;
   }
-  pmbus.scan(false); // initial query probe only; avoids querying every command automatically
+  pmbus.scan(false); // 仅进行基础探测，不自动对全部命令执行 QUERY
   pmbus.showAll(Serial, true, true);
 
   uint16_t raw = 0;
   if (pmbus.readWord(0x8B, raw)) {
-    Serial.print("READ_VOUT raw=0x"); Serial.println(raw, HEX);
+    Serial.print("READ_VOUT 原始值=0x"); Serial.println(raw, HEX);
   } else {
-    Serial.print("READ_VOUT failed, error="); Serial.println(pmbus.lastError());
+    Serial.print("READ_VOUT 读取失败，错误码="); Serial.println(pmbus.lastError());
   }
 
   // Extended command API is available, but byte order is device-specific.
