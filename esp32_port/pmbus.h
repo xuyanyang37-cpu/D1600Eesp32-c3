@@ -18,9 +18,18 @@ public:
         CMD_QUERY, CMD_COEFFICIENTS, CMD_APP_PROFILE, CMD_ENERGY,
         CMD_W0, CMD_W1, CMD_R1, CMD_R2
     };
+    // 物理量单位。新增项追加在末尾，保留既有枚举值，避免破坏现有代码兼容性。
     enum UnitType : uint8_t {
         UNIT_NONE=0, UNIT_VOLTS, UNIT_AMPERES, UNIT_MILLISECONDS,
-        UNIT_DEGREES_C, UNIT_WATTS, UNIT_BITS, UNIT_STRING
+        UNIT_DEGREES_C, UNIT_WATTS, UNIT_BITS, UNIT_STRING,
+        UNIT_PERCENT,             // 百分比：占空比等，缩放需按命令格式确认
+        UNIT_RPM,                 // 转/分钟：风扇转速
+        UNIT_HERTZ,               // 赫兹
+        UNIT_KILOHERTZ,           // 千赫兹
+        UNIT_OHMS,                // 欧姆
+        UNIT_MILLIOHMS,           // 毫欧
+        UNIT_VOLTS_PER_SECOND,    // 伏特/秒
+        UNIT_MILLIVOLTS_PER_AMP   // 毫伏/安培
     };
     struct Coefficients {
         bool valid;
