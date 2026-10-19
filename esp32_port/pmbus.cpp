@@ -27,8 +27,8 @@ static const uint8_t PMB_CLEAR_FAULT=0x03, PMB_CAPABILITY=0x19,
 
 PmbusPeek::PmbusPeek(TwoWire &bus)
  : _wire(bus), _address(0x58), _capability(0), _revision(0),
-   _lastError(0), _writesEnabled(false), _queryAvailable(false),
-   _scanComplete(false), _queryAllRequested(false), _commandCount(0) {
+   _lastError(0), _writesEnabled(false), _pecEnabled(false), _queryAvailable(false),
+   _scanComplete(false), _queryAllRequested(false), _pendingPecCrc(0), _commandCount(0) {
     initializeCommandTable();
 }
 
@@ -47,24 +47,53 @@ bool PmbusPeek::probe() {
     _lastError=rc;
     return rc==0;
 }
+uint8_t PmbusPeek::crc8Update(uint8_t crc, uint8_t data) {
+    crc ^= data;
+    for (uint8_t i=0; i<8; ++i) crc = (crc & 0x80U) ? (uint8_t)((crc << 1) ^ 0x07U) : (uint8_t)(crc << 1);
+    return crc;
+}
+uint8_t PmbusPeek::commandByteCount(uint16_t command) const {
+    if (command <= 0x00FFU) return 1;
+    return ((command & 0xFE00U) == 0xFE00U) ? 2 : 0;
+}
+bool PmbusPeek::writeCommandPrefix(uint16_t command) {
+    uint8_t n=commandByteCount(command);
+    if (!n) { _lastError=-2; return false; }
+    if (n==2) {
+        uint8_t prefix=(uint8_t)(command>>8), sub=(uint8_t)command;
+        if (_wire.write(prefix)!=1 || _wire.write(sub)!=1) { _lastError=-3; return false; }
+        if (_pecEnabled) { _pendingPecCrc=crc8Update(_pendingPecCrc,prefix); _pendingPecCrc=crc8Update(_pendingPecCrc,sub); }
+    } else {
+        uint8_t cmd=(uint8_t)command;
+        if (_wire.write(cmd)!=1) { _lastError=-3; return false; }
+        if (_pecEnabled) _pendingPecCrc=crc8Update(_pendingPecCrc,cmd);
+    }
+    return true;
+}
 bool PmbusPeek::selectCommand(uint16_t command) {
-    if (command>0xFF) { _lastError=-2; return false; }
+    if (!commandByteCount(command)) { _lastError=-2; return false; }
     _wire.beginTransmission(_address);
-    if (_wire.write((uint8_t)command)!=1) { _lastError=-3; return false; }
+    _pendingPecCrc=_pecEnabled ? crc8Update(0,(uint8_t)(_address<<1)) : 0;
+    if (!writeCommandPrefix(command)) return false;
     uint8_t rc=_wire.endTransmission(false);
     if (rc) { _lastError=rc; return false; }
     return true;
 }
 bool PmbusPeek::readRaw(uint8_t *buffer, size_t count) {
     if (!buffer || !count || count>32) { _lastError=-4; return false; }
-    size_t got=_wire.requestFrom((uint8_t)_address, count, (uint8_t)true);
-    if (got!=count) {
-        while (_wire.available()) (void)_wire.read();
-        _lastError=-5; return false;
-    }
+    size_t expected=count+(_pecEnabled?1U:0U);
+    size_t got=_wire.requestFrom((uint8_t)_address, expected, (uint8_t)true);
+    if (got!=expected) { while (_wire.available()) (void)_wire.read(); _lastError=-5; return false; }
+    uint8_t crc=_pendingPecCrc;
+    if (_pecEnabled) crc=crc8Update(crc,(uint8_t)((_address<<1)|1U));
     for (size_t i=0;i<count;i++) {
         if (!_wire.available()) { _lastError=-6; return false; }
         buffer[i]=(uint8_t)_wire.read();
+        if (_pecEnabled) crc=crc8Update(crc,buffer[i]);
+    }
+    if (_pecEnabled) {
+        if (!_wire.available()) { _lastError=-27; return false; }
+        if ((uint8_t)_wire.read()!=crc) { _lastError=-28; return false; }
     }
     _lastError=0; return true;
 }
