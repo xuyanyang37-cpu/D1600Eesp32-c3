@@ -1,10 +1,10 @@
 /*
- * ESP32/Arduino port of the PMBus diagnostic functionality in pmbus_peek.
- * Original project: https://github.com/jktjkt/pmbus_peek
- * Original copyright: David Brownell (2008), adapted by Jan Kundrat.
+ * pmbus_peek 的 ESP32/Arduino 移植版本，提供 PMBus 诊断功能。
+ * 原始项目：https://github.com/jktjkt/pmbus_peek
+ * 原始版权：David Brownell（2008），后由 Jan Kundrat 修改。
  *
- * This derived implementation is distributed under GPL-3.0-or-later.
- * It is provided WITHOUT ANY WARRANTY; see the GNU GPL for details.
+ * 本衍生实现按 GPL-3.0-or-later 许可证发布。
+ * 本程序不提供任何担保，详细条款请参阅 GNU GPL。
  */
 #include "pmbus.h"
 #include <string.h>
@@ -35,7 +35,7 @@ PmbusPeek::PmbusPeek(TwoWire &bus)
 bool PmbusPeek::begin(uint8_t address) {
     if (address > 0x7F) { _lastError=-1; return false; }
     _address=address; _lastError=0;
-    // Bus initialization belongs to the sketch; preserve custom SDA/SCL pins.
+    // I2C 总线由主程序初始化，避免覆盖用户设置的 SDA/SCL 引脚。
     return true;
 }
 bool PmbusPeek::writeAllowed() const {
@@ -47,15 +47,20 @@ bool PmbusPeek::probe() {
     _lastError=rc;
     return rc==0;
 }
+// 更新 SMBus PEC 的 CRC-8：多项式 0x07，按最高位优先逐位计算。
 uint8_t PmbusPeek::crc8Update(uint8_t crc, uint8_t data) {
     crc ^= data;
     for (uint8_t i=0; i<8; ++i) crc = (crc & 0x80U) ? (uint8_t)((crc << 1) ^ 0x07U) : (uint8_t)(crc << 1);
     return crc;
 }
+// 普通命令占 1 字节；本移植约定 0xFExx/0xFFxx 扩展命令占 2 字节。
+// 该扩展命令编码方式仍需与目标电源协议核对。
 uint8_t PmbusPeek::commandByteCount(uint16_t command) const {
     if (command <= 0x00FFU) return 1;
     return ((command & 0xFE00U) == 0xFE00U) ? 2 : 0;
 }
+// 将命令码写入当前 I2C 事务，并把命令字节加入 PEC 计算。
+// 扩展命令按“前缀字节、子命令字节”顺序发送，不能假定所有电源都如此定义。
 bool PmbusPeek::writeCommandPrefix(uint16_t command) {
     uint8_t n=commandByteCount(command);
     if (!n) { _lastError=-2; return false; }
@@ -70,6 +75,8 @@ bool PmbusPeek::writeCommandPrefix(uint16_t command) {
     }
     return true;
 }
+// 发送命令码并以 repeated-start 保持总线，供后续读取返回数据。
+// 同时初始化 PEC 的写地址和命令部分。
 bool PmbusPeek::selectCommand(uint16_t command) {
     if (!commandByteCount(command)) { _lastError=-2; return false; }
     _wire.beginTransmission(_address);
@@ -79,6 +86,8 @@ bool PmbusPeek::selectCommand(uint16_t command) {
     if (rc) { _lastError=rc; return false; }
     return true;
 }
+// 读取固定长度响应。启用 PEC 时额外读取最后 1 字节并核对 CRC。
+// 错误码 -28 表示 PEC 不匹配；失败时不应使用缓冲区中的数据。
 bool PmbusPeek::readRaw(uint8_t *buffer, size_t count) {
     if (!buffer || !count || count>32) { _lastError=-4; return false; }
     size_t expected=count+(_pecEnabled?1U:0U);
@@ -107,6 +116,8 @@ bool PmbusPeek::readWord(uint16_t command, uint16_t &value) {
     value=(uint16_t)b[0] | ((uint16_t)b[1]<<8);
     return true;
 }
+// 读取 SMBus Block：第 1 字节是长度，随后是数据，可选最后附带 PEC。
+// 当前 Arduino 移植限制数据部分最多 32 字节。
 bool PmbusPeek::readBlock(uint16_t command, uint8_t *buffer, size_t capacity, size_t &length) {
     length=0;
     if (!buffer || capacity==0 || capacity>32) { _lastError=-7; return false; }
@@ -126,6 +137,7 @@ bool PmbusPeek::readBlock(uint16_t command, uint8_t *buffer, size_t capacity, si
     }
     memcpy(buffer,raw+1,announced); length=announced; _lastError=0; return true;
 }
+// 写入一个数据字节。写操作必须由调用方先显式启用。
 bool PmbusPeek::writeByte(uint16_t command,uint8_t value) {
     if (!writeAllowed()) { _lastError=-20; return false; }
     if (!commandByteCount(command)) { _lastError=-2; return false; }
@@ -136,6 +148,7 @@ bool PmbusPeek::writeByte(uint16_t command,uint8_t value) {
     if(_pecEnabled) _wire.write(crc8Update(_pendingPecCrc,value));
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
+// 写入一个 16 位数据字，按 PMBus 常用的小端顺序发送低字节、再发送高字节。
 bool PmbusPeek::writeWord(uint16_t command,uint16_t value) {
     if (!writeAllowed()) { _lastError=-20; return false; }
     if (!commandByteCount(command)) { _lastError=-2; return false; }
@@ -147,6 +160,7 @@ bool PmbusPeek::writeWord(uint16_t command,uint16_t value) {
     if(_pecEnabled) _wire.write(crc8Update(crc8Update(_pendingPecCrc,lo),hi));
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
+// 写入 Block 数据：先发长度，再发数据，最后可选附加 PEC。
 bool PmbusPeek::writeBlock(uint16_t command,const uint8_t *buffer,size_t length) {
     if (!writeAllowed()) { _lastError=-20; return false; }
     if (!commandByteCount(command) || !buffer || !length || length>32) { _lastError=-21; return false; }
@@ -159,6 +173,7 @@ bool PmbusPeek::writeBlock(uint16_t command,const uint8_t *buffer,size_t length)
     if(_pecEnabled)_wire.write(crc);
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
+// 发送不带数据负载的命令；例如 CLEAR_FAULTS。该操作也受写保护开关控制。
 bool PmbusPeek::sendByte(uint8_t command) {
     if (!writeAllowed()) { _lastError=-20; return false; }
     _wire.beginTransmission(_address);
@@ -168,8 +183,8 @@ bool PmbusPeek::sendByte(uint8_t command) {
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
 bool PmbusPeek::queryCommand(uint8_t command,uint8_t &queryFlags) {
-    // SMBus process call: PEC covers address-W, command, write word,
-    // address-R and response word. readRaw validates the response side.
+    // SMBus Process Call：PEC 覆盖写地址、命令、请求数据、读地址和响应数据。
+    // readRaw() 负责核对响应部分的 PEC。
     _wire.beginTransmission(_address);
     _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
     _wire.write(PMB_QUERY);
@@ -185,7 +200,7 @@ bool PmbusPeek::queryCommand(uint8_t command,uint8_t &queryFlags) {
 }
 bool PmbusPeek::readCoefficients(uint8_t command,bool forRead,Coefficients &coeff) {
     coeff.valid=false;
-    // PEC covers the complete block-process-call request and response.
+    // PEC 应覆盖整个 Block Process Call 的请求和响应事务。
     _wire.beginTransmission(_address);
     _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
     _wire.write(PMB_COEFFICIENTS);
