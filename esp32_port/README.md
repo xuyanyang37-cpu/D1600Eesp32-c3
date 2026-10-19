@@ -15,9 +15,9 @@ Source reference: https://github.com/jktjkt/pmbus_peek (David Brownell / Jan Kun
 
 ## Important differences / limits
 - Linux CLI switches, /dev/i2c adapter discovery, ioctl capability flags, kernel PEC negotiation and Linux errno behavior are replaced by class methods and Arduino Wire.
-- Standard I2C extended command encodings 0xFE00/0xFFxx are catalogued but not transported; PMBus does not define a universally portable encoding for all extended commands.
+- Extended command transport is implemented for numeric codes 0xFExx and 0xFFxx using raw I2C bytes `[prefix, subcommand]`. The original Linux project explicitly returned ENOSYS for these commands; this byte order is an ESP32-side transport convention and must be verified against the target PSU before use.
 - Arduino Wire buffer limits mean block APIs currently cap payload at 32 bytes, unlike the Linux original's 255-byte block path.
-- PEC calculation/transport is not implemented. Arduino Wire does not automatically enable SMBus PEC.
+- Optional software PEC (CRC-8 polynomial 0x07) is implemented for byte/word/block reads and writes, SEND BYTE, QUERY and COEFFICIENTS. PEC is disabled by default; enable it only after confirming that the target PSU requires PEC. Extended-command PEC behavior is likewise device-dependent.
 - The source's command metadata is represented in a compact table, and does not reproduce every duplicate/quirky descriptor entry byte-for-byte.
 - QUERY and COEFFICIENTS use process-call wire sequences. Actual support by Dell/Delta D1600E-S0 firmware is unconfirmed; do not assume PMBus-standard command presence proves the PSU implements it.
 - The example performs a basic I2C probe and reads/prints status, inventory, values and command listing. Use the deeper scan intentionally: it may issue many QUERY transactions and unsupported commands can produce PSU communication alerts.
