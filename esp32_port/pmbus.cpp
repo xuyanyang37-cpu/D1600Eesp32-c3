@@ -27,7 +27,7 @@ static const uint8_t PMB_CLEAR_FAULT=0x03, PMB_CAPABILITY=0x19,
 
 PmbusPeek::PmbusPeek(TwoWire &bus)
  : _wire(bus), _address(0x58), _capability(0), _revision(0),
-   _lastError(0), _writesEnabled(false), _pecEnabled(false), _queryAvailable(false),
+   _lastError(0), _writesEnabled(false), _queryAvailable(false),
    _scanComplete(false), _queryAllRequested(false), _pendingPecCrc(0), _commandCount(0) {
     initializeCommandTable();
 }
@@ -47,62 +47,27 @@ bool PmbusPeek::probe() {
     _lastError=rc;
     return rc==0;
 }
-// 更新 SMBus PEC 的 CRC-8：多项式 0x07，按最高位优先逐位计算。
-uint8_t PmbusPeek::crc8Update(uint8_t crc, uint8_t data) {
-    crc ^= data;
-    for (uint8_t i=0; i<8; ++i) crc = (crc & 0x80U) ? (uint8_t)((crc << 1) ^ 0x07U) : (uint8_t)(crc << 1);
-    return crc;
-}
-// 普通命令占 1 字节；本移植约定 0xFExx/0xFFxx 扩展命令占 2 字节。
-// 该扩展命令编码方式仍需与目标电源协议核对。
+// 原版只处理单字节 PMBus 命令；扩展命令在原版中返回 ENOSYS，故不实现。
 uint8_t PmbusPeek::commandByteCount(uint16_t command) const {
-    if (command <= 0x00FFU) return 1;
-    return ((command & 0xFE00U) == 0xFE00U) ? 2 : 0;
+    return command <= 0x00FFU ? 1 : 0;
 }
-// 将命令码写入当前 I2C 事务，并把命令字节加入 PEC 计算。
-// 扩展命令按“前缀字节、子命令字节”顺序发送，不能假定所有电源都如此定义。
-bool PmbusPeek::writeCommandPrefix(uint16_t command) {
-    uint8_t n=commandByteCount(command);
-    if (!n) { _lastError=-2; return false; }
-    if (n==2) {
-        uint8_t prefix=(uint8_t)(command>>8), sub=(uint8_t)command;
-        if (_wire.write(prefix)!=1 || _wire.write(sub)!=1) { _lastError=-3; return false; }
-        if (_pecEnabled) { _pendingPecCrc=crc8Update(_pendingPecCrc,prefix); _pendingPecCrc=crc8Update(_pendingPecCrc,sub); }
-    } else {
-        uint8_t cmd=(uint8_t)command;
-        if (_wire.write(cmd)!=1) { _lastError=-3; return false; }
-        if (_pecEnabled) _pendingPecCrc=crc8Update(_pendingPecCrc,cmd);
-    }
-    return true;
-}
-// 发送命令码并以 repeated-start 保持总线，供后续读取返回数据。
-// 同时初始化 PEC 的写地址和命令部分。
+// 发送单字节命令，并以 repeated-start 接续读取。
 bool PmbusPeek::selectCommand(uint16_t command) {
-    if (!commandByteCount(command)) { _lastError=-2; return false; }
+    if (commandByteCount(command) != 1) { _lastError=-2; return false; }
     _wire.beginTransmission(_address);
-    _pendingPecCrc=_pecEnabled ? crc8Update(0,(uint8_t)(_address<<1)) : 0;
-    if (!writeCommandPrefix(command)) return false;
+    if (_wire.write((uint8_t)command) != 1) { _lastError=-3; return false; }
     uint8_t rc=_wire.endTransmission(false);
     if (rc) { _lastError=rc; return false; }
     return true;
 }
-// 读取固定长度响应。启用 PEC 时额外读取最后 1 字节并核对 CRC。
-// 错误码 -28 表示 PEC 不匹配；失败时不应使用缓冲区中的数据。
+// 读取固定长度数据，不附加或校验软件 PEC。
 bool PmbusPeek::readRaw(uint8_t *buffer, size_t count) {
     if (!buffer || !count || count>32) { _lastError=-4; return false; }
-    size_t expected=count+(_pecEnabled?1U:0U);
-    size_t got=_wire.requestFrom((uint8_t)_address, expected, (uint8_t)true);
-    if (got!=expected) { while (_wire.available()) (void)_wire.read(); _lastError=-5; return false; }
-    uint8_t crc=_pendingPecCrc;
-    if (_pecEnabled) crc=crc8Update(crc,(uint8_t)((_address<<1)|1U));
+    size_t got=_wire.requestFrom((uint8_t)_address, count, (uint8_t)true);
+    if (got!=count) { while (_wire.available()) (void)_wire.read(); _lastError=-5; return false; }
     for (size_t i=0;i<count;i++) {
         if (!_wire.available()) { _lastError=-6; return false; }
         buffer[i]=(uint8_t)_wire.read();
-        if (_pecEnabled) crc=crc8Update(crc,buffer[i]);
-    }
-    if (_pecEnabled) {
-        if (!_wire.available()) { _lastError=-27; return false; }
-        if ((uint8_t)_wire.read()!=crc) { _lastError=-28; return false; }
     }
     _lastError=0; return true;
 }
@@ -116,80 +81,61 @@ bool PmbusPeek::readWord(uint16_t command, uint16_t &value) {
     value=(uint16_t)b[0] | ((uint16_t)b[1]<<8);
     return true;
 }
-// 读取 SMBus Block：第 1 字节是长度，随后是数据，可选最后附带 PEC。
-// 当前 Arduino 移植限制数据部分最多 32 字节。
+// SMBus Block Read：长度字节后跟数据；受 Arduino Wire 缓冲区限制，最多 32 字节。
 bool PmbusPeek::readBlock(uint16_t command, uint8_t *buffer, size_t capacity, size_t &length) {
     length=0;
     if (!buffer || capacity==0 || capacity>32) { _lastError=-7; return false; }
     if (!selectCommand(command)) return false;
-    uint8_t raw[34];
-    size_t requestLen=33U+(_pecEnabled?1U:0U);
-    size_t got=_wire.requestFrom((uint8_t)_address,requestLen,(bool)true);
-    size_t n=0;
-    while (_wire.available() && n<sizeof(raw)) raw[n++]=(uint8_t)_wire.read();
-    if (!got || n<1) { _lastError=-8; return false; }
-    size_t announced=raw[0];
-    if (announced>32 || announced>capacity || announced+1U+(_pecEnabled?1U:0U)>n) { _lastError=-9; return false; }
-    if (_pecEnabled) {
-        uint8_t crc=crc8Update(_pendingPecCrc,(uint8_t)((_address<<1)|1U));
-        for(size_t i=0;i<announced+1U;i++) crc=crc8Update(crc,raw[i]);
-        if(raw[announced+1U]!=crc) { _lastError=-28; return false; }
+    size_t got=_wire.requestFrom((uint8_t)_address, (size_t)33, (uint8_t)true);
+    if (got<1 || !_wire.available()) { _lastError=-8; return false; }
+    uint8_t announced=(uint8_t)_wire.read();
+    if (announced>32 || announced>capacity || got<(size_t)announced+1U) {
+        while (_wire.available()) (void)_wire.read();
+        _lastError=-9; return false;
     }
-    memcpy(buffer,raw+1,announced); length=announced; _lastError=0; return true;
+    for (size_t i=0;i<announced;i++) {
+        if (!_wire.available()) { _lastError=-10; return false; }
+        buffer[i]=(uint8_t)_wire.read();
+    }
+    while (_wire.available()) (void)_wire.read();
+    length=announced; _lastError=0; return true;
 }
-// 写入一个数据字节。写操作必须由调用方先显式启用。
+// 写操作默认锁定。
 bool PmbusPeek::writeByte(uint16_t command,uint8_t value) {
     if (!writeAllowed()) { _lastError=-20; return false; }
-    if (!commandByteCount(command)) { _lastError=-2; return false; }
+    if (commandByteCount(command)!=1) { _lastError=-2; return false; }
     _wire.beginTransmission(_address);
-    _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
-    if(!writeCommandPrefix(command)) return false;
-    _wire.write(value);
-    if(_pecEnabled) _wire.write(crc8Update(_pendingPecCrc,value));
+    _wire.write((uint8_t)command); _wire.write(value);
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
-// 写入一个 16 位数据字，按 PMBus 常用的小端顺序发送低字节、再发送高字节。
 bool PmbusPeek::writeWord(uint16_t command,uint16_t value) {
     if (!writeAllowed()) { _lastError=-20; return false; }
-    if (!commandByteCount(command)) { _lastError=-2; return false; }
+    if (commandByteCount(command)!=1) { _lastError=-2; return false; }
     _wire.beginTransmission(_address);
-    _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
-    if(!writeCommandPrefix(command)) return false;
-    uint8_t lo=(uint8_t)value, hi=(uint8_t)(value>>8);
-    _wire.write(lo); _wire.write(hi);
-    if(_pecEnabled) _wire.write(crc8Update(crc8Update(_pendingPecCrc,lo),hi));
+    _wire.write((uint8_t)command);
+    _wire.write((uint8_t)value); _wire.write((uint8_t)(value>>8));
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
-// 写入 Block 数据：先发长度，再发数据，最后可选附加 PEC。
 bool PmbusPeek::writeBlock(uint16_t command,const uint8_t *buffer,size_t length) {
     if (!writeAllowed()) { _lastError=-20; return false; }
-    if (!commandByteCount(command) || !buffer || !length || length>32) { _lastError=-21; return false; }
+    if (commandByteCount(command)!=1 || !buffer || !length || length>32) { _lastError=-21; return false; }
     _wire.beginTransmission(_address);
-    _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
-    if(!writeCommandPrefix(command)) return false;
-    _wire.write((uint8_t)length);
-    uint8_t crc=_pecEnabled?crc8Update(_pendingPecCrc,(uint8_t)length):0;
-    for(size_t i=0;i<length;i++){_wire.write(buffer[i]);if(_pecEnabled)crc=crc8Update(crc,buffer[i]);}
-    if(_pecEnabled)_wire.write(crc);
+    _wire.write((uint8_t)command); _wire.write((uint8_t)length);
+    for(size_t i=0;i<length;i++) _wire.write(buffer[i]);
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
-// 发送不带数据负载的命令；例如 CLEAR_FAULTS。该操作也受写保护开关控制。
 bool PmbusPeek::sendByte(uint8_t command) {
     if (!writeAllowed()) { _lastError=-20; return false; }
     _wire.beginTransmission(_address);
-    uint8_t crc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
     _wire.write(command);
-    if(_pecEnabled){crc=crc8Update(crc,command);_wire.write(crc);}
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
+// 按原版 QUERY 的 SMBus Process Call 语义发送：写入 0x01、命令号，返回 0x01、标志字节。
 bool PmbusPeek::queryCommand(uint8_t command,uint8_t &queryFlags) {
-    // SMBus Process Call：PEC 覆盖写地址、命令、请求数据、读地址和响应数据。
-    // readRaw() 负责核对响应部分的 PEC。
     _wire.beginTransmission(_address);
-    _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
     _wire.write(PMB_QUERY);
-    _wire.write((uint8_t)0x01); _wire.write(command);
-    if(_pecEnabled){_pendingPecCrc=crc8Update(_pendingPecCrc,PMB_QUERY);_pendingPecCrc=crc8Update(_pendingPecCrc,0x01);_pendingPecCrc=crc8Update(_pendingPecCrc,command);}
+    _wire.write((uint8_t)0x01);
+    _wire.write(command);
     uint8_t rc=_wire.endTransmission(false);
     if(rc) {_lastError=rc; return false;}
     uint8_t b[2];
@@ -198,14 +144,12 @@ bool PmbusPeek::queryCommand(uint8_t command,uint8_t &queryFlags) {
     if((response&0xFF)!=0x01) {_lastError=-22;return false;}
     queryFlags=(uint8_t)(response>>8); _lastError=0; return true;
 }
+// 按原版 Block Process Call 请求 COEFFICIENTS；响应长度字节应为 5。
 bool PmbusPeek::readCoefficients(uint8_t command,bool forRead,Coefficients &coeff) {
     coeff.valid=false;
-    // PEC 应覆盖整个 Block Process Call 的请求和响应事务。
     _wire.beginTransmission(_address);
-    _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
     _wire.write(PMB_COEFFICIENTS);
     _wire.write((uint8_t)2); _wire.write(command); _wire.write(forRead?1:0);
-    if(_pecEnabled){_pendingPecCrc=crc8Update(_pendingPecCrc,PMB_COEFFICIENTS);_pendingPecCrc=crc8Update(_pendingPecCrc,2);_pendingPecCrc=crc8Update(_pendingPecCrc,command);_pendingPecCrc=crc8Update(_pendingPecCrc,forRead?1:0);}
     uint8_t rc=_wire.endTransmission(false);
     if(rc) {_lastError=rc;return false;}
     uint8_t b[6];
@@ -300,7 +244,6 @@ void PmbusPeek::initializeCommandTable() {
     for(uint8_t i=0;i<16;i++){ static const char *u[]={"user_data_00","user_data_01","user_data_02","user_data_03","user_data_04","user_data_05","user_data_06","user_data_07","user_data_08","user_data_09","user_data_10","user_data_11","user_data_12","user_data_13","user_data_14","user_data_15"}; addCommand((uint8_t)(0xB0+i),u[i],CMD_RWB);}
     addCommand(0xC0,"mfr_max_temp_1",CMD_RW2,UNIT_DEGREES_C); addCommand(0xC1,"mfr_max_temp_2",CMD_RW2,UNIT_DEGREES_C); addCommand(0xC2,"mfr_max_temp_3",CMD_RW2,UNIT_DEGREES_C);
     for(uint8_t i=0;i<=45;i++){static const char *unused="mfr_specific"; addCommand((uint8_t)(0xD0+i),unused,CMD_UNKNOWN);}
-    addCommand(0xFE,"mfr_specific_command_ext",CMD_UNKNOWN); addCommand(0xFF,"pmbus_command_ext",CMD_UNKNOWN);
 }
 bool PmbusPeek::queryInternal(CommandInfo &info) {
     if(info.command>0xFF) return false;
@@ -397,7 +340,7 @@ void PmbusPeek::showValues(Stream &out) {
             else if(((c.query>>2)&7)==3)val=decodeDirect((int16_t)w,c.readCoefficients);
             else val=decodeLinear11(w);
         }}
-        else if(c.type==CMD_ENERGY){uint8_t e[6];size_t n=0;ok=readBlock(c.command,e,6,n)&&n==6;if(ok)val=(double)e[0]+((uint16_t)e[1]<<8)+((uint32_t)e[2]<<16)+((uint32_t)e[3]<<24);}
+        else if(c.type==CMD_ENERGY){uint8_t e[6];size_t n=0;ok=readBlock(c.command,e,6,n)&&n==6;if(ok)val=(double)e[0]+((double)e[1]*256.0)+((double)e[2]*65536.0)+((double)e[3]*16777216.0)+((double)e[4]*4294967296.0)+((double)e[5]*1099511627776.0);}
         else continue;
         out.print("  0x");out.print(c.command,HEX);out.print(" ");out.print(c.tag);out.print(": ");
         if(!ok)out.print("read failed");
