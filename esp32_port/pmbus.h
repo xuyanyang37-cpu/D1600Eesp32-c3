@@ -48,21 +48,13 @@ public:
     void setWritesEnabled(bool enabled) { _writesEnabled = enabled; }
     bool writesEnabled() const { return _writesEnabled; }
 
-    // 开启/关闭软件 PEC 校验（CRC-8，多项式 0x07）；默认关闭。
-    // 只有确认目标电源要求 PEC 后才开启。
-    void setPECEnabled(bool enabled) { _pecEnabled = enabled; }
-    bool pecEnabled() const { return _pecEnabled; }
-
-    // 判断是否属于 0xFExx / 0xFFxx 扩展命令。
-    // 扩展命令的传输字节顺序仍需结合目标电源协议确认。
-    bool isExtendedCommand(uint16_t command) const { return (command & 0xFE00U) == 0xFE00U; }
     uint8_t address() const { return _address; }
     int lastError() const { return _lastError; }
     uint8_t capability() const { return _capability; }
     uint8_t revision() const { return _revision; }
     bool queryAvailable() const { return _queryAvailable; }
 
-    // 底层 PMBus/I2C 操作。扩展命令采用两字节前缀传输约定，使用前需验证目标协议。
+    // 底层 PMBus/I2C 操作。只实现原版支持的单字节命令；扩展命令不实现。
     bool probe();
     bool readByte(uint16_t command, uint8_t &value);
     bool readWord(uint16_t command, uint16_t &value);
@@ -97,9 +89,7 @@ private:
     TwoWire &_wire;
     uint8_t _address, _capability, _revision;
     int _lastError;
-    bool _writesEnabled, _pecEnabled, _queryAvailable, _scanComplete, _queryAllRequested;
-    uint8_t _pendingPecCrc;
-    static uint8_t crc8Update(uint8_t crc, uint8_t data);
+    bool _writesEnabled, _queryAvailable, _scanComplete, _queryAllRequested;
     bool writeCommandPrefix(uint16_t command);
     uint8_t commandByteCount(uint16_t command) const;
     CommandInfo _commands[180];
