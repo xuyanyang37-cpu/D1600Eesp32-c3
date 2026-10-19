@@ -361,11 +361,48 @@ void PmbusPeek::showValues(Stream &out) {
             else if(((c.query>>2)&7)==3)val=decodeDirect((int16_t)w,c.readCoefficients);
             else val=decodeLinear11(w);
         }}
-        else if(c.type==CMD_ENERGY){uint8_t e[6];size_t n=0;ok=readBlock(c.command,e,6,n)&&n==6;if(ok)val=(double)e[0]+((double)e[1]*256.0)+((double)e[2]*65536.0)+((double)e[3]*16777216.0)+((double)e[4]*4294967296.0)+((double)e[5]*1099511627776.0);}
-        else continue;
+        uint8_t energyRaw[6]={0,0,0,0,0,0};
+        if(c.type==CMD_ENERGY) {
+            size_t n=0;
+            ok=readBlock(c.command,energyRaw,sizeof(energyRaw),n)&&n==sizeof(energyRaw);
+            if(ok) {
+                // 按原版 ENERGY 格式：byte0..1 为 16 位累加器，byte2 为回绕计数；
+                // byte3..5 是 samples 字段，不属于一个简单的 48 位整数。
+                uint16_t accumulator=(uint16_t)energyRaw[0]|((uint16_t)energyRaw[1]<<8);
+                uint8_t rollovers=energyRaw[2];
+                uint8_t format=(uint8_t)((c.query>>2)&7);
+                if(format==0) {
+                    const double maxLinearCount=33521664.0; // 原版 ((2^10)-1) * 2^15
+                    val=(double)rollovers*maxLinearCount+(double)accumulator;
+                } else if(format==3 && c.readCoefficients.valid && c.readCoefficients.m!=0) {
+                    const Coefficients &cf=c.readCoefficients;
+                    double scale=pow(10.0,-cf.R);
+                    double maxValue=((double)cf.m*32767.0+(double)cf.b)*scale;
+                    double currentValue=((double)accumulator*scale-(double)cf.b)/(double)cf.m;
+                    val=(double)rollovers*maxValue+currentValue;
+                } else {
+                    val=NAN; // 格式或 DIRECT 系数未确认，不能猜测解码
+                }
+            }
+        } else if(c.type!=CMD_R1 && c.type!=CMD_RW1 && c.type!=CMD_R2 && c.type!=CMD_RW2) {
+            continue;
+        }
         out.print("  0x");out.print(c.command,HEX);out.print(" ");out.print(c.tag);out.print(": ");
         if(!ok)out.print("read failed");
-        else {out.print("raw=0x");if(c.type==CMD_R1||c.type==CMD_RW1){if(b<16)out.print('0');out.print(b,HEX);}else{if(w<0x1000)out.print('0');if(w<0x100)out.print('0');if(w<0x10)out.print('0');out.print(w,HEX);}out.print(" value=");out.print(val,4);out.print(" ");out.print(unitName(c.units));}
+        else {
+            out.print("raw=0x");
+            if(c.type==CMD_ENERGY) {
+                for(size_t k=0;k<sizeof(energyRaw);k++) { if(energyRaw[k]<16)out.print('0');out.print(energyRaw[k],HEX); }
+            } else if(c.type==CMD_R1||c.type==CMD_RW1) {
+                if(b<16)out.print('0');out.print(b,HEX);
+            } else {
+                if(w<0x1000)out.print('0');if(w<0x100)out.print('0');if(w<0x10)out.print('0');out.print(w,HEX);
+            }
+            out.print(" value=");
+            if(isnan(val)) out.print("unknown (QUERY format/coefficients unavailable)");
+            else out.print(val,4);
+            out.print(" ");out.print(unitName(c.units));
+        }
         out.println();
     }
 }
