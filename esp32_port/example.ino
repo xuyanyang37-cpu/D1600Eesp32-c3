@@ -17,6 +17,9 @@ void setup() {
   Wire.setClock(100000);
   pmbus.begin(PSU_I2C_ADDRESS);
 
+  // Optional software PEC (CRC-8/0x07). Keep off unless target PSU requires it.
+  // pmbus.setPECEnabled(true);
+
   Serial.println("D1600E PMBus full-feature diagnostic port");
   Serial.println("READ ONLY by default. No writes are enabled.");
   if (!pmbus.probe()) {
@@ -33,6 +36,13 @@ void setup() {
   } else {
     Serial.print("READ_VOUT failed, error="); Serial.println(pmbus.lastError());
   }
+
+  // Extended command API is available, but byte order is device-specific.
+  // After confirming the PSU protocol, examples are:
+  // uint8_t extByte = 0;
+  // uint16_t extWord = 0;
+  // pmbus.readByte(0xFE00, extByte); // transmits bytes FE 00, then reads one byte
+  // pmbus.readWord(0xFF12, extWord); // transmits bytes FF 12, then reads a word
 
   // Optional deeper discovery: queries every command descriptor.
   // This can trigger PSU error/alert handling if unsupported. Call only deliberately:
