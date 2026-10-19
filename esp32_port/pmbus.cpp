@@ -168,9 +168,13 @@ bool PmbusPeek::sendByte(uint8_t command) {
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
 bool PmbusPeek::queryCommand(uint8_t command,uint8_t &queryFlags) {
-    // SMBus process call: QUERY(0x1A), write word 0x01xx, read word.
-    _wire.beginTransmission(_address); _wire.write(PMB_QUERY);
+    // SMBus process call: PEC covers address-W, command, write word,
+    // address-R and response word. readRaw validates the response side.
+    _wire.beginTransmission(_address);
+    _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
+    _wire.write(PMB_QUERY);
     _wire.write((uint8_t)0x01); _wire.write(command);
+    if(_pecEnabled){_pendingPecCrc=crc8Update(_pendingPecCrc,PMB_QUERY);_pendingPecCrc=crc8Update(_pendingPecCrc,0x01);_pendingPecCrc=crc8Update(_pendingPecCrc,command);}
     uint8_t rc=_wire.endTransmission(false);
     if(rc) {_lastError=rc; return false;}
     uint8_t b[2];
@@ -181,9 +185,12 @@ bool PmbusPeek::queryCommand(uint8_t command,uint8_t &queryFlags) {
 }
 bool PmbusPeek::readCoefficients(uint8_t command,bool forRead,Coefficients &coeff) {
     coeff.valid=false;
-    // PMBus COEFFICIENTS block process call: [cmd, len=2, target, read/write].
-    _wire.beginTransmission(_address); _wire.write(PMB_COEFFICIENTS);
+    // PEC covers the complete block-process-call request and response.
+    _wire.beginTransmission(_address);
+    _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
+    _wire.write(PMB_COEFFICIENTS);
     _wire.write((uint8_t)2); _wire.write(command); _wire.write(forRead?1:0);
+    if(_pecEnabled){_pendingPecCrc=crc8Update(_pendingPecCrc,PMB_COEFFICIENTS);_pendingPecCrc=crc8Update(_pendingPecCrc,2);_pendingPecCrc=crc8Update(_pendingPecCrc,command);_pendingPecCrc=crc8Update(_pendingPecCrc,forRead?1:0);}
     uint8_t rc=_wire.endTransmission(false);
     if(rc) {_lastError=rc;return false;}
     uint8_t b[6];
