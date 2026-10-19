@@ -17,7 +17,6 @@ void setup() {
   Wire.setClock(100000);
   pmbus.begin(PSU_I2C_ADDRESS);
 
-    // 
   Serial.println("D1600E PMBus 诊断程序");
   Serial.println("默认只读，所有写操作均已锁定。");
   if (!pmbus.probe()) {
@@ -34,13 +33,6 @@ void setup() {
   } else {
     Serial.print("READ_VOUT 读取失败，错误码="); Serial.println(pmbus.lastError());
   }
-
-  // Extended command API is available, but byte order is device-specific.
-  // After confirming the PSU protocol, examples are:
-  // uint8_t extByte = 0;
-  // uint16_t extWord = 0;
-  // pmbus.readByte(0xFE00, extByte); // transmits bytes FE 00, then reads one byte
-  // pmbus.readWord(0xFF12, extWord); // transmits bytes FF 12, then reads a word
 
   // Optional deeper discovery: queries every command descriptor.
   // This can trigger PSU error/alert handling if unsupported. Call only deliberately:
