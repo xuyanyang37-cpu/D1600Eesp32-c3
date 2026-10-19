@@ -86,7 +86,7 @@ private:
     TwoWire &_wire;
     uint8_t _address, _capability, _revision;
     int _lastError;
-    bool _writesEnabled, _queryAvailable, _scanComplete;
+    bool _writesEnabled, _queryAvailable, _scanComplete, _queryAllRequested;
     CommandInfo _commands[180];
     size_t _commandCount;
 
