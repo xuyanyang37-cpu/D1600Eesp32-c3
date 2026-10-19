@@ -288,11 +288,15 @@ void PmbusPeek::initializeCommandTable() {
     addCommand(0x8C,"read_iout",CMD_R2,UNIT_AMPERES);
     addCommand(0x8D,"read_temperature_1",CMD_R2,UNIT_DEGREES_C); addCommand(0x8E,"read_temperature_2",CMD_R2,UNIT_DEGREES_C);
     addCommand(0x8F,"read_temperature_3",CMD_R2,UNIT_DEGREES_C);
+    // 风扇遥测通常以 RPM 表示；设备返回格式和比例仍需 QUERY/实测确认。
     for(uint8_t i=0;i<4;i++){
         static const char *fanReadNames[]={"read_fan_speed_1","read_fan_speed_2","read_fan_speed_3","read_fan_speed_4"};
-        addCommand((uint8_t)(0x90+i),fanReadNames[i],CMD_R2);
+        addCommand((uint8_t)(0x90+i),fanReadNames[i],CMD_R2,UNIT_RPM);
     }
-    addCommand(0x94,"read_duty_cycle",CMD_R2); addCommand(0x95,"read_frequency",CMD_R2);
+    // READ_DUTY_CYCLE 是实际占空比读数，不是 MAX_DUTY(0x32) 最大占空比限制。
+    // READ_FREQUENCY 常见以 kHz 表示；设备单位/缩放仍需 QUERY 与实测确认。
+    addCommand(0x94,"read_duty_cycle",CMD_R2,UNIT_PERCENT);
+    addCommand(0x95,"read_frequency",CMD_R2,UNIT_KILOHERTZ);
     addCommand(0x96,"read_pout",CMD_R2,UNIT_WATTS); addCommand(0x97,"read_pin",CMD_R2,UNIT_WATTS);
     // 0x98 PMBUS_REVISION：PMBus协议版本；0x99–0x9E：厂商ID、型号、版本、产地、日期、序列号字符串。
     // 0x9F APP_PROFILE_SUPPORT：厂商应用配置/配置档案信息。
@@ -346,7 +350,24 @@ bool PmbusPeek::scan(bool queryAllCommands) {
     _scanComplete=true; return true;
 }
 const char *PmbusPeek::unitName(UnitType u) {
-    switch(u){case UNIT_VOLTS:return "V";case UNIT_AMPERES:return "A";case UNIT_MILLISECONDS:return "ms";case UNIT_DEGREES_C:return "C";case UNIT_WATTS:return "W";case UNIT_BITS:return "bits";case UNIT_STRING:return "string";default:return "";}
+    switch(u) {
+        case UNIT_VOLTS: return "V";
+        case UNIT_AMPERES: return "A";
+        case UNIT_MILLISECONDS: return "ms";
+        case UNIT_DEGREES_C: return "C";
+        case UNIT_WATTS: return "W";
+        case UNIT_BITS: return "bits";
+        case UNIT_STRING: return "string";
+        case UNIT_PERCENT: return "%";
+        case UNIT_RPM: return "RPM";
+        case UNIT_HERTZ: return "Hz";
+        case UNIT_KILOHERTZ: return "kHz";
+        case UNIT_OHMS: return "ohm";
+        case UNIT_MILLIOHMS: return "mohm";
+        case UNIT_VOLTS_PER_SECOND: return "V/s";
+        case UNIT_MILLIVOLTS_PER_AMP: return "mV/A";
+        default: return "";
+    }
 }
 double PmbusPeek::decodeLinear11(uint16_t raw) {
     int16_t exp=(int16_t)(raw>>11); if(exp&0x10) exp|=(int16_t)0xFFE0;
