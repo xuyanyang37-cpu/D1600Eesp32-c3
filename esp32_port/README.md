@@ -1,28 +1,30 @@
-# jktjkt/pmbus_peek 的 ESP32 移植版
+# jktjkt/pmbus_peek 的 ESP32 移植版（按原版行为收敛）
 
-原始项目：https://github.com/jktjkt/pmbus_peek（David Brownell / Jan Kundrat；GPL-3.0-or-later）。本项目是在 Arduino/ESP32 上重新实现诊断流程，并非对 Linux ioctl 代码逐行翻译。
+原始项目：https://github.com/jktjkt/pmbus_peek
 
-## 已实现的功能
-- 字节、字（16 位）、Block 数据的读取；对应的写入接口；不带数据的 SEND BYTE 命令。
-- PMBus QUERY 处理调用和 COEFFICIENTS 处理调用接口。
-- 读取 CAPABILITY、PMBus 版本、厂商信息字符串和应用配置块。
-- 常用标准 PMBus 命令、遥测、状态、厂商命令和用户数据区域的命令表。
-- STATUS_WORD、STATUS_BYTE 及状态子寄存器的显示。
-- 遥测值显示，以及 LINEAR11、VOUT_MODE/LINEAR16、DIRECT 格式转换辅助函数和系数显示。
-- PAGE 选择、CLEAR_FAULTS 和厂商无数据命令。
-- 扫描、设备信息、状态、测量值和命令列表显示。
-- 写保护：默认禁止写入；只有调用方显式执行 setWritesEnabled(true) 后，写接口才允许发送命令。
+本目录将原版 Linux 工具的诊断流程移植到 Arduino/ESP32 的 `Wire`。本次收敛遵循“只实现原版已有行为，不自行扩展协议”的原则。
 
-## 与原项目的差异及限制
-- Linux 命令行参数、/dev/i2c 设备发现、ioctl 能力标志、内核 PEC 协商和 Linux errno 行为，改由类接口及 Arduino Wire 实现。
-- 已为 0xFExx 和 0xFFxx 数值命令加入扩展传输路径，按原始 I2C 字节 `[前缀, 子命令]` 发送。原始 Linux 项目对此返回 ENOSYS；这里的字节顺序只是 ESP32 端采用的传输约定，使用前必须对照目标电源协议确认。
-- 受 Arduino Wire 缓冲区限制，当前 Block 数据最多 32 字节；原 Linux 版本的 Block 路径可处理最多 255 字节。
-- 已为字节/字/Block 读写、SEND BYTE、QUERY 和 COEFFICIENTS 加入可选软件 PEC（CRC-8，多项式 0x07）。PEC 默认关闭；确认目标电源需要 PEC 后再开启。扩展命令的 PEC 规则也取决于具体设备。
-- 命令元数据以精简表格表示，未逐条复刻原始项目中所有重复或特殊的描述符。
-- QUERY 和 COEFFICIENTS 使用 Process Call 总线序列。Dell/Delta D1600E-S0 固件是否支持尚未确认；不能因为命令属于 PMBus 标准，就断定电源一定实现了它。
-- 示例会进行基础 I2C 探测，并显示状态、设备信息、测量值和命令列表。深入扫描可能发出大量 QUERY 事务，不支持的命令可能导致电源产生通信告警，请谨慎执行。
-- 默认地址为此前观测到的 7 位地址 0x58。SDA/SCL 引脚需按实际接线修改；请使用合适的电平转换、开漏上拉，并确保信号地共地。
-- 尚未完成实机验证。连接电源前，应先使用目标 ESP32 Arduino Core 和开发板配置进行编译测试。
+## 移植范围
+- 单字节 PMBus 命令的 Byte、Word、Block 读写及 SEND BYTE。
+- QUERY（`0x1A`）Process Call 事务。
+- COEFFICIENTS（`0x30`）Block Process Call 事务。
+- CAPABILITY、PMBus 版本、厂商库存字符串、应用配置块。
+- 常见遥测、状态寄存器、命令表、LINEAR11 / LINEAR16 / DIRECT 换算。
+- PAGE、CLEAR_FAULTS 和原版列出的厂商无数据命令入口。
+- 写操作默认禁用，需调用方显式启用。
+
+## 明确移除 / 不实现
+- **移除自行增加的软件 PEC 开关和 PEC 处理**。原版对 QUERY、COEFFICIENTS 等特殊事务注明没有实现用户态 PEC；普通事务的 PEC 由 Linux SMBus 适配器处理。Arduino 移植不伪称与原版等价。
+- **移除自行增加的 0xFExx / 0xFFxx 两字节扩展命令传输**。原版对扩展命令的相关读写函数返回 `ENOSYS`，因此本移植也不实现。
+- 不宣称支持原版未实现的扩展协议或 D1600E-S0 厂商私有协议。
+- Arduino `Wire` 缓冲区及实现可能限制 Block 长度；当前接口按最多 32 字节处理，不等同于 Linux 的 I²C 原始事务回退路径。
+
+## 重要限制
+- 默认地址为此前观测到的 7 位地址 `0x58`，不是由本程序自动证明的固定地址。
+- SDA/SCL 引脚必须按实际接线修改；确保电平兼容、开漏上拉和信号地共地。
+- 全量 QUERY 会发送大量事务；应先使用 `scan(false)`，再根据电源响应决定是否进行深入扫描。
+- 写操作默认关闭。未验证电源行为前，不要启用写入或执行 PAGE/清故障等可能改变设备状态的命令。
+- 尚未完成 ESP32 实际编译及 D1600E-S0 实机验证；Process Call 的 Wire 时序兼容性必须通过逻辑分析仪或实机读取进一步确认。
 
 ## 基本用法
 ```cpp
@@ -31,8 +33,6 @@ PmbusPeek pmbus(Wire);
 pmbus.begin(0x58);
 pmbus.scan(false);
 pmbus.showAll(Serial, true, true);
-
-// 写操作默认锁定；只有确认安全后才显式解锁：
-pmbus.setWritesEnabled(true);
-pmbus.writeWord(0x21, rawValue);
 ```
+
+原始项目按其仓库中的许可证和版权声明使用；本目录为衍生移植。
