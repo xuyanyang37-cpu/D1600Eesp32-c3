@@ -44,14 +44,19 @@ public:
     bool begin(uint8_t address = 0x58); // call Wire.begin(SDA,SCL) first
     void setWritesEnabled(bool enabled) { _writesEnabled = enabled; }
     bool writesEnabled() const { return _writesEnabled; }
+    // Software SMBus PEC (CRC-8 polynomial 0x07), disabled by default.
+    void setPECEnabled(bool enabled) { _pecEnabled = enabled; }
+    bool pecEnabled() const { return _pecEnabled; }
+    // Extended commands use prefix-first encoding; verify target protocol.
+    bool isExtendedCommand(uint16_t command) const { return (command & 0xFE00U) == 0xFE00U; }
     uint8_t address() const { return _address; }
     int lastError() const { return _lastError; }
     uint8_t capability() const { return _capability; }
     uint8_t revision() const { return _revision; }
     bool queryAvailable() const { return _queryAvailable; }
 
-    // Transport / PMBus primitives (command supports standard 8-bit codes;
-    // extended 0xFE00/0xFF00 commands are represented but not wire-encoded).
+    // Transport / PMBus primitives. Extended 0xFExx/0xFFxx commands use a
+    // two-byte prefix-first raw-I2C encoding; verify this against the device.
     bool probe();
     bool readByte(uint16_t command, uint8_t &value);
     bool readWord(uint16_t command, uint16_t &value);
@@ -86,7 +91,11 @@ private:
     TwoWire &_wire;
     uint8_t _address, _capability, _revision;
     int _lastError;
-    bool _writesEnabled, _queryAvailable, _scanComplete, _queryAllRequested;
+    bool _writesEnabled, _pecEnabled, _queryAvailable, _scanComplete, _queryAllRequested;
+    uint8_t _pendingPecCrc;
+    static uint8_t crc8Update(uint8_t crc, uint8_t data);
+    bool writeCommandPrefix(uint16_t command);
+    uint8_t commandByteCount(uint16_t command) const;
     CommandInfo _commands[180];
     size_t _commandCount;
 
