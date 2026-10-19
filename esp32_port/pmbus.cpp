@@ -1,3 +1,11 @@
+/*
+ * ESP32/Arduino port of the PMBus diagnostic functionality in pmbus_peek.
+ * Original project: https://github.com/jktjkt/pmbus_peek
+ * Original copyright: David Brownell (2008), adapted by Jan Kundrat.
+ *
+ * This derived implementation is distributed under GPL-3.0-or-later.
+ * It is provided WITHOUT ANY WARRANTY; see the GNU GPL for details.
+ */
 #include "pmbus.h"
 #include <string.h>
 #include <math.h>
@@ -288,6 +296,7 @@ bool PmbusPeek::statusByte(Stream &out,uint8_t cmd,const char *label,const char 
 }
 void PmbusPeek::showStatus(Stream &out) {
     static const char *wordBits[16]={"unspecified","comm/memory/logic","temperature","vin_underflow","iout_overflow","vout_overflow","off","busy","unknown","other","fan","power_good#","mfr","vin","iout","vout"};
+    static const char *byteBits[8]={"unspecified","comm/memory/logic","temperature","vin_underflow","iout_overflow","vout_overflow","off","busy"};
     uint16_t w=0;
     if(readWord(PMB_STATUS_WORD,w)){out.print("STATUS_WORD 0x");if(w<0x1000)out.print('0');if(w<0x100)out.print('0');if(w<0x10)out.print('0');out.print(w,HEX);out.print(": ");bool f=true;for(int i=15;i>=0;i--)if(w&(1<<i)){if(!f)out.print(", ");out.print(wordBits[i]);f=false;}out.println();}
     static const char *vout[8]={"VOUT tracking error","TOFF_MAX warning","TON_MAX fault","exceeded VOUT_MAX","undervoltage fault","undervoltage warning","overvoltage warning","overvoltage fault"};
@@ -298,7 +307,7 @@ void PmbusPeek::showStatus(Stream &out) {
     static const char *other[8]={"reserved","output OR-ing fault","input B OR-ing fault","input A OR-ing fault","input B fuse fault","input A fuse fault","reserved","reserved"};
     static const char *mfr[8]={"mfr bit 0","mfr bit 1","mfr bit 2","mfr bit 3","mfr bit 4","mfr bit 5","mfr bit 6","mfr bit 7"};
     static const char *fans[8]={"fan 1 fault","fan 1 warning","fan 2 fault","fan 2 warning","fan 1 override","fan 2 override","airflow fault","airflow warning"};
-    statusByte(out,PMB_STATUS_BYTE,"STATUS_BYTE",wordBits); statusByte(out,PMB_STATUS_VOUT,"STATUS_VOUT",vout);
+    statusByte(out,PMB_STATUS_BYTE,"STATUS_BYTE",byteBits); statusByte(out,PMB_STATUS_VOUT,"STATUS_VOUT",vout);
     statusByte(out,PMB_STATUS_IOUT,"STATUS_IOUT",iout); statusByte(out,PMB_STATUS_INPUT,"STATUS_INPUT",input);
     statusByte(out,PMB_STATUS_TEMP,"STATUS_TEMPERATURE",temp); statusByte(out,PMB_STATUS_CML,"STATUS_CML",cml);
     statusByte(out,PMB_STATUS_OTHER,"STATUS_OTHER",other); statusByte(out,PMB_STATUS_MFR,"STATUS_MFR_SPECIFIC",mfr);
