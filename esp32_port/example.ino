@@ -17,9 +17,7 @@ void setup() {
   Wire.setClock(100000);
   pmbus.begin(PSU_I2C_ADDRESS);
 
-  // 可选：启用软件 PEC（CRC-8/0x07）。只有确认电源要求 PEC 后才取消下一行注释。
-  // pmbus.setPECEnabled(true);
-
+    // 
   Serial.println("D1600E PMBus 诊断程序");
   Serial.println("默认只读，所有写操作均已锁定。");
   if (!pmbus.probe()) {
