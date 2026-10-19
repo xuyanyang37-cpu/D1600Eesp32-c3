@@ -1,28 +1,38 @@
-# ESP32 port of pmbus_peek (read-side subset)
+# ESP32 port of jktjkt/pmbus_peek
 
-Inspired by [jktjkt/pmbus_peek](https://github.com/jktjkt/pmbus_peek), originally a Linux userspace diagnostic utility by David Brownell. The original uses Linux `i2c-dev`/SMBus ioctls and is not directly compilable on Arduino ESP32.
+Source reference: https://github.com/jktjkt/pmbus_peek (David Brownell / Jan Kundrat; GPL-3.0-or-later). This is a functional Arduino/ESP32 reimplementation of the diagnostic workflow, not a literal source-level conversion of Linux ioctl code.
 
-## Files
-- `pmbus.h`, `pmbus.cpp`: Arduino `TwoWire` implementation for PMBus byte, word and block reads, a curated read-only command probe, and an optional QUERY process-call helper.
-- `example.ino`: minimal serial probe example.
+## Implemented feature areas
+- Byte, word, block reads; byte, word, block writes; no-data SEND BYTE.
+- PMBus QUERY process-call and COEFFICIENTS process-call attempts.
+- Capability / PMBus revision reads; manufacturer inventory strings; application-profile block.
+- Command catalogue for common standard PMBus commands, telemetry, status, manufacturer commands and user-data ranges.
+- Status-word/status-byte and status subregister reporting.
+- Telemetry values, LINEAR11 / VOUT_MODE LINEAR16 / DIRECT decoding helpers, coefficient display.
+- PAGE selection, CLEAR_FAULTS, manufacturer no-data command.
+- Scan, inventory, status, values and command-list display methods.
+- Explicit write gate: writes disabled by default and all write methods fail until caller invokes setWritesEnabled(true).
 
-## Safety and limitations
-- This is a read-side subset, not a complete port of the 2,165-line Linux utility. It does not implement Linux ioctl behavior, automatic coefficient discovery/decoding, all command types, PEC, or extended 16-bit PMBus commands.
-- Default probe only reads a curated list of standard telemetry/status commands. It does not scan every command number because some command codes are write-only or may have device-specific side effects.
-- `queryCommand()` sends a PMBus QUERY process-call transaction to command 0x1A. It is never called automatically; use only after confirming the target firmware supports QUERY.
-- D1600E-S0 PMBus command support is not proven merely because a command is in the PMBus standard. Test against the PSU with writes disabled.
-- `0x58` is the user's observed 7-bit I2C address. Change SDA/SCL GPIOs in the example to match the actual board.
-- Never connect PSU output or non-3.3 V logic directly to ESP32 pins. Use proper open-drain level shifting and a suitable signal ground.
-- This repository currently contains firmware-reverse-engineering notes rather than an existing PlatformIO/Arduino application; these files are a standalone port module and have not been integrated into a pre-existing `pmbus.cpp` or hardware-tested here.
+## Important differences / limits
+- Linux CLI switches, /dev/i2c adapter discovery, ioctl capability flags, kernel PEC negotiation and Linux errno behavior are replaced by class methods and Arduino Wire.
+- Standard I2C extended command encodings 0xFE00/0xFFxx are catalogued but not transported; PMBus does not define a universally portable encoding for all extended commands.
+- Arduino Wire buffer limits mean block APIs currently cap payload at 32 bytes, unlike the Linux original's 255-byte block path.
+- PEC calculation/transport is not implemented. Arduino Wire does not automatically enable SMBus PEC.
+- The source's command metadata is represented in a compact table, and does not reproduce every duplicate/quirky descriptor entry byte-for-byte.
+- QUERY and COEFFICIENTS use process-call wire sequences. Actual support by Dell/Delta D1600E-S0 firmware is unconfirmed; do not assume PMBus-standard command presence proves the PSU implements it.
+- The example performs a basic I2C probe and reads/prints status, inventory, values and command listing. Use the deeper scan intentionally: it may issue many QUERY transactions and unsupported commands can produce PSU communication alerts.
+- Default address is the user's observed 7-bit 0x58. Change SDA/SCL pins to actual hardware. Use proper level shifting/open-drain pull-ups and common signal ground.
+- Not hardware-tested here; compile against the exact ESP32 Arduino core and board before connecting to the PSU.
 
-## API
+## Basic use
 ```cpp
+Wire.begin(SDA_PIN, SCL_PIN);
 PmbusPeek pmbus(Wire);
 pmbus.begin(0x58);
-pmbus.readByte(0x19, value);
-pmbus.readWord(0x8B, rawVout);
-pmbus.readBlock(0x99, buffer, sizeof(buffer), length);
-pmbus.printKnownReadOnly(Serial);
-```
+pmbus.scan(false);
+pmbus.showAll(Serial, true, true);
 
-The original project is GPL-3.0-or-later; review and preserve applicable licensing obligations when distributing a derived port.
+// Explicit writes are locked until deliberately enabled:
+pmbus.setWritesEnabled(true);
+pmbus.writeWord(0x21, rawValue);
+```
