@@ -20,7 +20,7 @@ static const uint8_t PMB_CLEAR_FAULT=0x03, PMB_CAPABILITY=0x19,
 PmbusPeek::PmbusPeek(TwoWire &bus)
  : _wire(bus), _address(0x58), _capability(0), _revision(0),
    _lastError(0), _writesEnabled(false), _queryAvailable(false),
-   _scanComplete(false), _commandCount(0) {
+   _scanComplete(false), _queryAllRequested(false), _commandCount(0) {
     initializeCommandTable();
 }
 
@@ -237,7 +237,7 @@ bool PmbusPeek::queryInternal(CommandInfo &info) {
     delay(1); return true;
 }
 bool PmbusPeek::scan(bool queryAllCommands) {
-    _queryAvailable=false; _scanComplete=false;
+    _queryAvailable=false; _scanComplete=false; _queryAllRequested=queryAllCommands;
     uint8_t q=0;
     if(queryCommand(PMB_QUERY,q)) _queryAvailable=true;
     uint8_t cap=0;
@@ -308,7 +308,7 @@ void PmbusPeek::showValues(Stream &out) {
     out.println("Attribute values (queries are attempted only if QUERY is available):");
     for(size_t i=0;i<_commandCount;i++){
         CommandInfo &c=_commands[i]; if(c.flags&(F_SHOW_P1|F_STATUS))continue;
-        if(_queryAvailable && !c.supportedKnown) queryInternal(c);
+        if(_queryAllRequested && _queryAvailable && !c.supportedKnown) queryInternal(c);
         if(c.supportedKnown&&!c.supported)continue;
         uint16_t w=0;uint8_t b=0;double val=NAN;bool ok=false;
         if(c.type==CMD_R1 || c.type==CMD_RW1){ok=readByte(c.command,b);val=b;}
@@ -328,7 +328,7 @@ void PmbusPeek::showValues(Stream &out) {
 void PmbusPeek::showCommands(Stream &out) {
     out.println("Command catalogue / QUERY capabilities (r=read, w=write):");
     for(size_t i=0;i<_commandCount;i++){
-        CommandInfo &c=_commands[i];if(_queryAvailable&&!c.supportedKnown)queryInternal(c);
+        CommandInfo &c=_commands[i];if(_queryAllRequested && _queryAvailable && !c.supportedKnown)queryInternal(c);
         if(c.supportedKnown&&!c.supported)continue;
         out.print("  0x");if(c.command<16)out.print('0');out.print(c.command,HEX);out.print(" ");out.print(c.tag);
         out.print(" ");out.print((c.query&(1<<5))?'r':'-');out.print((c.query&(1<<6))?'w':'-');
