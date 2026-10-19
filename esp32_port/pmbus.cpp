@@ -211,59 +211,105 @@ const PmbusPeek::CommandInfo *PmbusPeek::findCommand(uint16_t command) const {
 }
 void PmbusPeek::initializeCommandTable() {
     _commandCount=0;
+    // 地址表说明：
+    // 这里的十六进制值是 PMBus 命令码，不是 I2C 从设备地址。
+    // 标签主要用于终端输出；每项的标准含义见 esp32_port/README.md 的“PMBus 地址功能对照表”。
+    // 除非有 D1600E-S0 实测证据，否则下列含义只代表 PMBus 标准定义，不代表该电源必然支持。
+    // 0x00 PAGE：选择多路输出中的页面；0x01 OPERATION：输出开/关及工作模式控制。
+    // 0x02 ON_OFF_CONFIG：开关机控制来源/极性配置；0x03 CLEAR_FAULTS：清除状态故障锁存（会改变设备状态）。
+    // 0x04 PHASE：相位选择；0x05 PAGE_PLUS_READ：选择页面并读取指定命令。
+    // 0x10 WRITE_PROTECT：写保护控制。以下写命令在本程序中默认被软件锁住。
     addCommand(0x00,"page",CMD_RW1); addCommand(0x01,"operation",CMD_RW1);
     addCommand(0x02,"on_off_config",CMD_RW1); addCommand(0x03,"clear_faults",CMD_W0);
     addCommand(0x04,"phase",CMD_RW1); addCommand(0x05,"page_plus_read",CMD_RWB);
     addCommand(0x10,"write_protect",CMD_RW1);
+    // 0x11/0x13/0x15/0x17：保存默认值/用户值；0x12/0x14/0x16/0x18：恢复默认值/用户值。
+    // 这些命令可能写入非易失存储或改变运行参数，仅读取分析时不要调用。
     addCommand(0x11,"store_default_all",CMD_W0); addCommand(0x12,"restore_default_all",CMD_W0);
     addCommand(0x13,"store_default_code",CMD_W1); addCommand(0x14,"restore_default_code",CMD_W1);
     addCommand(0x15,"store_user_all",CMD_W0); addCommand(0x16,"restore_user_all",CMD_W0);
     addCommand(0x17,"store_user_code",CMD_W1); addCommand(0x18,"restore_user_code",CMD_W1);
+    // 0x19 CAPABILITY：总线/协议能力位；0x1A QUERY：查询指定命令支持情况、格式及读写属性。
+    // 0x1B SMBALERT_MASK：SMBALERT# 告警屏蔽位；0x20 VOUT_MODE：输出电压数据格式/指数。
+    // 0x21 VOUT_COMMAND：输出电压目标设定值，不等同于实测输出电压 READ_VOUT(0x8B)。
     addCommand(0x19,"capability",CMD_R1,UNIT_BITS,F_SHOW_P1);
     addCommand(0x1A,"query",CMD_QUERY); addCommand(0x1B,"smbalert_mask",CMD_RWB);
     addCommand(0x20,"vout_mode",CMD_RW1); addCommand(0x21,"vout_command",CMD_RW2,UNIT_VOLTS,F_VOUT);
+    // 0x22 VOUT_TRIM：输出电压微调；0x23 VOUT_CAL_OFFSET：电压校准偏移。
+    // 0x24 VOUT_MAX：输出电压上限；0x25/0x26：高/低裕量目标电压。
+    // 0x27 VOUT_TRANSITION_RATE：电压变化速率；0x28 VOUT_DROOP：负载线下垂设置。
+    // 0x29 VOUT_SCALE_LOOP：环路电压缩放；0x2A VOUT_SCALE_MONITOR：电压监测缩放。
+    // 0x30 COEFFICIENTS：DIRECT 格式的 m/b/R 换算系数，不是普通遥测值。
     addCommand(0x22,"vout_trim",CMD_RW2,UNIT_VOLTS); addCommand(0x23,"vout_cal_offset",CMD_RW2,UNIT_VOLTS);
     addCommand(0x24,"vout_max",CMD_RW2,UNIT_VOLTS,F_VOUT); addCommand(0x25,"vout_margin_high",CMD_RW2,UNIT_VOLTS,F_VOUT);
     addCommand(0x26,"vout_margin_low",CMD_RW2,UNIT_VOLTS,F_VOUT); addCommand(0x27,"vout_transition_rate",CMD_RW2);
     addCommand(0x28,"vout_droop",CMD_RW2); addCommand(0x29,"vout_scale_loop",CMD_RW2);
     addCommand(0x2A,"vout_scale_monitor",CMD_RW2); addCommand(0x30,"coefficients",CMD_COEFFICIENTS);
+    // 0x31 POUT_MAX：最大输出功率限制；0x32 MAX_DUTY：最大占空比限制/设定值（不是实际占空比读数）。
+    // 0x33 FREQUENCY_SWITCH：开关频率设置；0x35 VIN_ON：输入电压达到该值时允许启动。
     addCommand(0x31,"pout_max",CMD_RW2,UNIT_WATTS); addCommand(0x32,"max_duty",CMD_RW2);
     addCommand(0x33,"frequency_switch",CMD_RW2); addCommand(0x35,"vin_on",CMD_RW2,UNIT_VOLTS);
+    // 0x36 VIN_OFF：输入电压低于该值时关闭/停止；0x37 INTERLEAVE：交错相位配置。
+    // 0x38 IOUT_CAL_GAIN：输出电流测量增益校准；0x39 IOUT_CAL_OFFSET：输出电流测量偏移校准。
     addCommand(0x36,"vin_off",CMD_RW2,UNIT_VOLTS); addCommand(0x37,"interleave",CMD_RW2);
     addCommand(0x38,"iout_cal_gain",CMD_RW2); addCommand(0x39,"iout_cal_offset",CMD_RW2,UNIT_AMPERES);
+    // 0x3A FAN_CONFIG_1_2：风扇1/2配置；0x3B/0x3C：风扇1/2转速或控制命令。
+    // 0x3D FAN_CONFIG_3_4：风扇3/4配置；0x3E/0x3F：风扇3/4转速或控制命令。
     addCommand(0x3A,"fan_config_1_2",CMD_RW1); addCommand(0x3B,"fan_command_1",CMD_RW2);
     addCommand(0x3C,"fan_command_2",CMD_RW2); addCommand(0x3D,"fan_config_3_4",CMD_RW1);
     addCommand(0x3E,"fan_command_3",CMD_RW2); addCommand(0x3F,"fan_command_4",CMD_RW2);
+    // 0x40–0x4C：输出电压过压/欠压阈值、输出电流过流/欠流阈值及对应故障响应。
+    // 每个地址的具体名称按 names[] 顺序对应连续地址 0x40+i；LIMIT 是阈值，RESPONSE 是故障动作。
     const char *names[]={"vout_ov_fault_limit","vout_ov_fault_response","vout_ov_warn_limit","vout_uv_warn_limit","vout_uv_fault_limit","vout_uv_fault_response","iout_oc_fault_limit","iout_oc_fault_response","iout_oc_lv_fault_limit","iout_oc_lv_fault_response","iout_oc_warn_limit","iout_uc_fault_limit","iout_uc_fault_response"};
     for(uint8_t i=0;i<13;i++) addCommand((uint16_t)(0x40+i),names[i],(i==1||i==5||i==7||i==9||i==12)?CMD_RW1:CMD_RW2, (i<=5||i==8)?UNIT_VOLTS:(i>=6&&i<=11?UNIT_AMPERES:UNIT_NONE),(i==0||i==2||i==3||i==4||i==8)?F_VOUT:0);
+    // 0x4F/0x50：过温故障阈值/响应；0x51–0x54：过温警告、欠温警告、欠温故障阈值及欠温故障响应。
     addCommand(0x4F,"ot_fault_limit",CMD_RW2,UNIT_DEGREES_C); addCommand(0x50,"ot_fault_response",CMD_RW1);
     addCommand(0x51,"ot_warn_limit",CMD_RW2,UNIT_DEGREES_C); addCommand(0x52,"ut_warn_limit",CMD_RW2,UNIT_DEGREES_C);
     addCommand(0x53,"ut_fault_limit",CMD_RW2,UNIT_DEGREES_C); addCommand(0x54,"ut_fault_response",CMD_RW1);
+    // 0x55–0x5C：输入过压/欠压阈值与响应、输入过流阈值与响应。
+    // 0x5D–0x63：POWER_GOOD 开关阈值、上电延迟/上升时间/最大上电时间故障、关断延迟/下降时间/最大关断时间警告。
     const char *vinNames[]={"vin_ov_fault_limit","vin_ov_fault_response","vin_ov_warn_limit","vin_uv_warn_limit","vin_uv_fault_limit","vin_uv_fault_response","iin_oc_fault_limit","iin_oc_fault_response","iin_oc_warn_limit","power_good_on","power_good_off","ton_delay","ton_rise","ton_max_fault_limit","ton_max_fault_response","toff_delay","toff_fall","toff_max_warn_limit"};
     for(uint8_t i=0;i<18;i++){uint8_t cmd=(uint8_t)(0x55+i); bool one=(cmd==0x56||cmd==0x5A||cmd==0x5C||cmd==0x63); addCommand(cmd,vinNames[i],one?CMD_RW1:CMD_RW2,cmd>=0x60?UNIT_MILLISECONDS:(cmd<=0x5A?UNIT_VOLTS:UNIT_AMPERES),(cmd==0x5E||cmd==0x5F)?F_VOUT:0);}
+    // 0x68/0x69：输出功率过载故障阈值/响应；0x6A：输出功率过载警告阈值；0x6B：输入功率警告阈值。
     addCommand(0x68,"pout_op_fault_limit",CMD_RW2,UNIT_WATTS); addCommand(0x69,"pout_op_fault_response",CMD_RW1);
     addCommand(0x6A,"pout_op_warn_limit",CMD_RW2,UNIT_WATTS); addCommand(0x6B,"pin_op_warn_limit",CMD_RW2,UNIT_WATTS);
+    // 0x78 STATUS_BYTE、0x79 STATUS_WORD：汇总故障状态；0x7A–0x82：输出、电流、输入、温度、通信、其他、厂商、风扇状态位。
     addCommand(0x78,"status_byte",CMD_R1,UNIT_BITS,F_STATUS); addCommand(0x79,"status_word",CMD_R2,UNIT_BITS,F_STATUS);
     const char *statusNames[]={"status_vout","status_iout","status_input","status_temperature","status_cml","status_other","status_mfr_specific","status_fans_1_2","status_fans_3_4"};
     for(uint8_t i=0;i<9;i++) addCommand((uint8_t)(0x7A+i),statusNames[i],CMD_R1,UNIT_BITS,F_STATUS);
+    // 0x86 READ_EIN：输入能量累计；0x87 READ_EOUT：输出能量累计（含回绕/采样字段，不能当作普通 48 位整数）。
+    // 0x88–0x8C：输入电压、输入电流、电容电压、输出电压、输出电流的实测遥测值。
+    // 0x8D–0x8F：温度1/2/3实测值；0x90–0x93：风扇1/2/3/4转速实测值。
+    // 0x94 READ_DUTY_CYCLE：实际占空比读数；0x95 READ_FREQUENCY：实际开关频率；
+    // 0x96 READ_POUT：实际输出功率；0x97 READ_PIN：实际输入功率。
     addCommand(0x86,"read_ein",CMD_ENERGY); addCommand(0x87,"read_eout",CMD_ENERGY);
     addCommand(0x88,"read_vin",CMD_R2,UNIT_VOLTS); addCommand(0x89,"read_iin",CMD_R2,UNIT_AMPERES);
     addCommand(0x8A,"read_vcap",CMD_R2,UNIT_VOLTS); addCommand(0x8B,"read_vout",CMD_R2,UNIT_VOLTS,F_VOUT);
     addCommand(0x8C,"read_iout",CMD_R2,UNIT_AMPERES);
     addCommand(0x8D,"read_temperature_1",CMD_R2,UNIT_DEGREES_C); addCommand(0x8E,"read_temperature_2",CMD_R2,UNIT_DEGREES_C);
     addCommand(0x8F,"read_temperature_3",CMD_R2,UNIT_DEGREES_C);
-    for(uint8_t i=0;i<4;i++){char *n=(char*)""; (void)n; addCommand((uint8_t)(0x90+i),"read_fan_speed",CMD_R2);}
+    for(uint8_t i=0;i<4;i++){
+        static const char *fanReadNames[]={"read_fan_speed_1","read_fan_speed_2","read_fan_speed_3","read_fan_speed_4"};
+        addCommand((uint8_t)(0x90+i),fanReadNames[i],CMD_R2);
+    }
     addCommand(0x94,"read_duty_cycle",CMD_R2); addCommand(0x95,"read_frequency",CMD_R2);
     addCommand(0x96,"read_pout",CMD_R2,UNIT_WATTS); addCommand(0x97,"read_pin",CMD_R2,UNIT_WATTS);
+    // 0x98 PMBUS_REVISION：PMBus协议版本；0x99–0x9E：厂商ID、型号、版本、产地、日期、序列号字符串。
+    // 0x9F APP_PROFILE_SUPPORT：厂商应用配置/配置档案信息。
     addCommand(0x98,"pmbus_revision",CMD_R1,UNIT_BITS,F_SHOW_P1);
     addCommand(0x99,"mfr_id",CMD_RWB,UNIT_STRING,F_SHOW_P1); addCommand(0x9A,"mfr_model",CMD_RWB,UNIT_STRING,F_SHOW_P1);
     addCommand(0x9B,"mfr_revision",CMD_RWB,UNIT_STRING,F_SHOW_P1); addCommand(0x9C,"mfr_location",CMD_RWB,UNIT_STRING,F_SHOW_P1);
     addCommand(0x9D,"mfr_date",CMD_RWB,UNIT_STRING,F_SHOW_P1); addCommand(0x9E,"mfr_serial",CMD_RWB,UNIT_STRING,F_SHOW_P1);
     addCommand(0x9F,"app_profile_support",CMD_APP_PROFILE,F_SHOW_P1);
+    // 0xA0–0xAE：厂商定义的电气/热规格、效率/精度信息，以及芯片设备ID/修订号。
+    // 这些厂商项必须核对该电源固件定义；名称只是 PMBus 常见命名，不等于已验证的 D1600E 私有语义。
     const char *mf[]={"mfr_vin_min","mfr_vin_max","mfr_iin_max","mfr_pin_max","mfr_vout_min","mfr_vout_max","mfr_iout_max","mfr_pout_max","mfr_tambient_max","mfr_tambient_min","mfr_efficiency_ll","mfr_efficiency_hl","mfr_pin_accuracy","ic_device_id","ic_device_rev"};
     for(uint8_t i=0;i<15;i++) addCommand((uint8_t)(0xA0+i),mf[i],i>=10&&i<=11?CMD_RWB14:(i>=13?CMD_RWB:CMD_R2),i==3||i==7?UNIT_WATTS:(i==2||i==6?UNIT_AMPERES:(i==8||i==9?UNIT_DEGREES_C:UNIT_VOLTS)),i>=13?F_SHOW_P1:0);
+    // 0xB0–0xBF：USER_DATA_00..15，厂商/用户自定义数据区；不能仅凭地址推断具体参数。
     for(uint8_t i=0;i<16;i++){ static const char *u[]={"user_data_00","user_data_01","user_data_02","user_data_03","user_data_04","user_data_05","user_data_06","user_data_07","user_data_08","user_data_09","user_data_10","user_data_11","user_data_12","user_data_13","user_data_14","user_data_15"}; addCommand((uint8_t)(0xB0+i),u[i],CMD_RWB);}
+    // 0xC0–0xC2：厂商定义的温度1/2/3最大值；含义和单位仍需设备文档或实测确认。
     addCommand(0xC0,"mfr_max_temp_1",CMD_RW2,UNIT_DEGREES_C); addCommand(0xC1,"mfr_max_temp_2",CMD_RW2,UNIT_DEGREES_C); addCommand(0xC2,"mfr_max_temp_3",CMD_RW2,UNIT_DEGREES_C);
+    // 0xD0–0xFD：本移植仅登记为厂商专用命令占位项；没有电源专用证据时不应尝试写入。
     for(uint8_t i=0;i<=45;i++){static const char *unused="mfr_specific"; addCommand((uint8_t)(0xD0+i),unused,CMD_UNKNOWN);}
 }
 bool PmbusPeek::queryInternal(CommandInfo &info) {
