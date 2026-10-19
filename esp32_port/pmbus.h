@@ -9,8 +9,7 @@
  * 安全说明：
  * 1. begin()、scan()、showAll() 不会主动向电源写入设置。
  * 2. 写操作默认禁用；只有显式调用 setWritesEnabled(true) 才允许写入。
- * 3. PEC 默认关闭；需确认电源协议后再启用。
- * 4. 扩展命令 0xFExx/0xFFxx 的编码方式尚需目标设备协议验证。
+ * 3. 不实现原版未支持的扩展命令；本移植不额外加入软件 PEC。
  */
 class PmbusPeek {
 public:
