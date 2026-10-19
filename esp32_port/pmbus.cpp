@@ -128,27 +128,43 @@ bool PmbusPeek::readBlock(uint16_t command, uint8_t *buffer, size_t capacity, si
 }
 bool PmbusPeek::writeByte(uint16_t command,uint8_t value) {
     if (!writeAllowed()) { _lastError=-20; return false; }
-    if (command>0xFF) { _lastError=-2; return false; }
-    _wire.beginTransmission(_address); _wire.write((uint8_t)command); _wire.write(value);
+    if (!commandByteCount(command)) { _lastError=-2; return false; }
+    _wire.beginTransmission(_address);
+    _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
+    if(!writeCommandPrefix(command)) return false;
+    _wire.write(value);
+    if(_pecEnabled) _wire.write(crc8Update(_pendingPecCrc,value));
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
 bool PmbusPeek::writeWord(uint16_t command,uint16_t value) {
     if (!writeAllowed()) { _lastError=-20; return false; }
-    if (command>0xFF) { _lastError=-2; return false; }
-    _wire.beginTransmission(_address); _wire.write((uint8_t)command);
-    _wire.write((uint8_t)(value&0xFF)); _wire.write((uint8_t)(value>>8));
+    if (!commandByteCount(command)) { _lastError=-2; return false; }
+    _wire.beginTransmission(_address);
+    _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
+    if(!writeCommandPrefix(command)) return false;
+    uint8_t lo=(uint8_t)value, hi=(uint8_t)(value>>8);
+    _wire.write(lo); _wire.write(hi);
+    if(_pecEnabled) _wire.write(crc8Update(crc8Update(_pendingPecCrc,lo),hi));
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
 bool PmbusPeek::writeBlock(uint16_t command,const uint8_t *buffer,size_t length) {
     if (!writeAllowed()) { _lastError=-20; return false; }
-    if (command>0xFF || !buffer || !length || length>32) { _lastError=-21; return false; }
-    _wire.beginTransmission(_address); _wire.write((uint8_t)command); _wire.write((uint8_t)length);
-    for(size_t i=0;i<length;i++) _wire.write(buffer[i]);
+    if (!commandByteCount(command) || !buffer || !length || length>32) { _lastError=-21; return false; }
+    _wire.beginTransmission(_address);
+    _pendingPecCrc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
+    if(!writeCommandPrefix(command)) return false;
+    _wire.write((uint8_t)length);
+    uint8_t crc=_pecEnabled?crc8Update(_pendingPecCrc,(uint8_t)length):0;
+    for(size_t i=0;i<length;i++){_wire.write(buffer[i]);if(_pecEnabled)crc=crc8Update(crc,buffer[i]);}
+    if(_pecEnabled)_wire.write(crc);
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
 bool PmbusPeek::sendByte(uint8_t command) {
     if (!writeAllowed()) { _lastError=-20; return false; }
-    _wire.beginTransmission(_address); _wire.write(command);
+    _wire.beginTransmission(_address);
+    uint8_t crc=_pecEnabled?crc8Update(0,(uint8_t)(_address<<1)):0;
+    _wire.write(command);
+    if(_pecEnabled){crc=crc8Update(crc,command);_wire.write(crc);}
     uint8_t rc=_wire.endTransmission(true); _lastError=rc; return rc==0;
 }
 bool PmbusPeek::queryCommand(uint8_t command,uint8_t &queryFlags) {
