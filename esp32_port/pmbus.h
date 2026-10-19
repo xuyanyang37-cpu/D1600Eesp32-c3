@@ -3,27 +3,102 @@
 #include <Wire.h>
 
 /*
- * ESP32 Arduino read-side port inspired by jktjkt/pmbus_peek.
- * This is a small portable subset, not a line-for-line port of the Linux tool.
- * Default behavior is read-only; QUERY process-call support is opt-in.
+ * Arduino/ESP32 port of the functional PMBus diagnostic workflow in
+ * jktjkt/pmbus_peek. Transport uses Arduino TwoWire instead of Linux i2c-dev.
+ *
+ * IMPORTANT: write operations are exposed as explicit calls only. Nothing in
+ * begin()/scan()/showAll() writes to the PSU. The caller must explicitly
+ * authorize write operations with setWritesEnabled(true).
  */
 class PmbusPeek {
 public:
-    explicit PmbusPeek(TwoWire &bus = Wire);
-    bool begin(uint8_t address = 0x58);
-    bool readByte(uint8_t command, uint8_t &value);
-    bool readWord(uint8_t command, uint16_t &value);
-    bool readBlock(uint8_t command, uint8_t *buffer, size_t capacity, size_t &length);
-    bool queryCommand(uint8_t command, uint8_t &queryFlags); // optional PMBus QUERY process call
-    void printKnownReadOnly(Stream &out);
+    enum CommandType : uint8_t {
+        CMD_UNKNOWN=0, CMD_RW1, CMD_RW2, CMD_RWB, CMD_RWB14,
+        CMD_QUERY, CMD_COEFFICIENTS, CMD_APP_PROFILE, CMD_ENERGY,
+        CMD_W0, CMD_W1, CMD_R1, CMD_R2
+    };
+    enum UnitType : uint8_t {
+        UNIT_NONE=0, UNIT_VOLTS, UNIT_AMPERES, UNIT_MILLISECONDS,
+        UNIT_DEGREES_C, UNIT_WATTS, UNIT_BITS, UNIT_STRING
+    };
+    struct Coefficients {
+        bool valid;
+        int8_t R;
+        int16_t m;
+        int16_t b;
+    };
+    struct CommandInfo {
+        uint16_t command;
+        const char *tag;
+        CommandType type;
+        UnitType units;
+        uint8_t flags;
+        uint8_t query;
+        Coefficients writeCoefficients;
+        Coefficients readCoefficients;
+        bool supportedKnown;
+        bool supported;
+    };
 
+    explicit PmbusPeek(TwoWire &bus = Wire);
+    bool begin(uint8_t address = 0x58); // call Wire.begin(SDA,SCL) first
+    void setWritesEnabled(bool enabled) { _writesEnabled = enabled; }
+    bool writesEnabled() const { return _writesEnabled; }
     uint8_t address() const { return _address; }
     int lastError() const { return _lastError; }
+    uint8_t capability() const { return _capability; }
+    uint8_t revision() const { return _revision; }
+    bool queryAvailable() const { return _queryAvailable; }
+
+    // Transport / PMBus primitives (command supports standard 8-bit codes;
+    // extended 0xFE00/0xFF00 commands are represented but not wire-encoded).
+    bool probe();
+    bool readByte(uint16_t command, uint8_t &value);
+    bool readWord(uint16_t command, uint16_t &value);
+    bool readBlock(uint16_t command, uint8_t *buffer, size_t capacity, size_t &length);
+    bool writeByte(uint16_t command, uint8_t value);
+    bool writeWord(uint16_t command, uint16_t value);
+    bool writeBlock(uint16_t command, const uint8_t *buffer, size_t length);
+    bool sendByte(uint8_t command); // no data byte, e.g. CLEAR_FAULT
+    bool queryCommand(uint8_t command, uint8_t &queryFlags);
+    bool readCoefficients(uint8_t command, bool forRead, Coefficients &coeff);
+    bool readInventoryString(uint8_t command, char *out, size_t outSize);
+    bool setPage(uint8_t page);
+    bool clearFaults();
+    bool issueManufacturerNoData(uint8_t index); // explicit, writes must be enabled
+
+    // Higher-level equivalents of pmbus_peek's scan/list/show paths.
+    bool scan(bool queryAllCommands = false);
+    void showDeviceInfo(Stream &out);
+    void showStatus(Stream &out);
+    void showValues(Stream &out);
+    void showCommands(Stream &out);
+    void showAll(Stream &out, bool values = true, bool commands = true);
+    void printKnownReadOnly(Stream &out); // convenience alias for showValues()
+
+    // Encoding helpers, exposed for tests and callers.
+    static double decodeLinear11(uint16_t raw);
+    static double decodeLinear16(uint16_t raw, int8_t exponent);
+    static double decodeDirect(int16_t raw, const Coefficients &coeff);
+    static const char *unitName(UnitType unit);
 
 private:
     TwoWire &_wire;
-    uint8_t _address;
+    uint8_t _address, _capability, _revision;
     int _lastError;
-    bool selectCommand(uint8_t command);
-    bool readBytes(uint8_t *buffer, size_t count);
+    bool _writesEnabled, _queryAvailable, _scanComplete;
+    CommandInfo _commands[180];
+    size_t _commandCount;
+
+    bool selectCommand(uint16_t command);
+    bool readRaw(uint8_t *buffer, size_t count);
+    bool writeAllowed() const;
+    CommandInfo *findCommand(uint16_t command);
+    const CommandInfo *findCommand(uint16_t command) const;
+    void addCommand(uint16_t cmd, const char *tag, CommandType type,
+                    UnitType unit = UNIT_NONE, uint8_t flags = 0);
+    bool queryInternal(CommandInfo &info);
+    bool readInventory(Stream &out, uint8_t cmd, const char *label);
+    bool statusByte(Stream &out, uint8_t cmd, const char *label, const char *const bits[8]);
+    void initializeCommandTable();
 };
