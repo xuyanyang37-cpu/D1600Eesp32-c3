@@ -89,7 +89,6 @@ private:
     uint8_t _address, _capability, _revision;
     int _lastError;
     bool _writesEnabled, _queryAvailable, _scanComplete, _queryAllRequested;
-    bool writeCommandPrefix(uint16_t command);
     uint8_t commandByteCount(uint16_t command) const;
     CommandInfo _commands[180];
     size_t _commandCount;
