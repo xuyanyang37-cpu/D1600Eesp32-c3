@@ -44,6 +44,10 @@ public:
     bool begin(uint8_t address = 0x58); // call Wire.begin(SDA,SCL) first
     void setWritesEnabled(bool enabled) { _writesEnabled = enabled; }
     bool writesEnabled() const { return _writesEnabled; }
+    void setPECEnabled(bool enabled) { _pecEnabled = enabled; }
+    bool pecEnabled() const { return _pecEnabled; }
+    // Encoded as 0xFExx / 0xFFxx; wire byte order must be verified for target PSU.
+    bool isExtendedCommand(uint16_t command) const { return (command & 0xFE00U) == 0xFE00U; }
     // Software SMBus PEC (CRC-8 polynomial 0x07), disabled by default.
     void setPECEnabled(bool enabled) { _pecEnabled = enabled; }
     bool pecEnabled() const { return _pecEnabled; }
